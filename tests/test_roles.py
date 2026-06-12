@@ -33,6 +33,6 @@ def test_build_adapter_guards():
     human = ROLES["payer.medical_director"]
     with pytest.raises(ValueError):
         build_adapter(human, provider_key="x")
-    # frameworks not yet wired raise NotImplementedError (intentional, Day-2 incremental)
+    # frameworks whose adapter wiring isn't enabled raise NotImplementedError
     with pytest.raises(NotImplementedError):
         build_adapter(ROLES["provider.counsel"], provider_key="x")

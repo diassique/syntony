@@ -9,8 +9,8 @@ This module is domain-independent. It defines:
   This is pure data — fully testable without any framework installed or any key.
 - ``build_adapter`` — turns a ``RoleSpec`` into a concrete Band framework adapter.
   Adapters need their pip extra + a ``provider_key``, so imports happen lazily inside
-  this function. The per-framework construction is wired incrementally (see TODOs);
-  exact framework/Band APIs are confirmed in NOTES_BAND.md before use — never guessed.
+  this function. Per-framework construction is wired incrementally (see TODOs); the
+  framework/Band APIs are verified against the installed SDK before use.
 
 The actual run loop is Band's: ``Agent.create(adapter=build_adapter(spec, key), ...).run()``.
 """
@@ -63,7 +63,7 @@ def build_adapter(spec: RoleSpec, provider_key: str):
     """Construct the Band framework adapter for ``spec``.
 
     Lazy imports: each branch needs the matching `band-sdk` extra installed. Wired
-    incrementally as we install extras and obtain keys (Day 2+). HUMAN has no adapter.
+    incrementally as each extra is installed. HUMAN roles have no adapter.
     """
     if spec.is_human:
         raise ValueError(f"Role {spec.id!r} is a human participant; it has no adapter.")
@@ -75,13 +75,13 @@ def build_adapter(spec: RoleSpec, provider_key: str):
 
     if spec.framework is Framework.PYDANTIC_AI:
         # Preferred path: model-agnostic + AI/ML API base_url (see engine/llm.py).
-        # TODO(day2): from band.adapters.pydantic_ai import PydanticAIAdapter
+        # TODO: from band.adapters.pydantic_ai import PydanticAIAdapter
         #   return PydanticAIAdapter(model=..., system_prompt=spec.system_prompt, features=features)
-        raise NotImplementedError("pydantic_ai adapter wiring lands once extras+keys are present")
+        raise NotImplementedError("pydantic_ai adapter wiring is not enabled in this build")
     if spec.framework is Framework.LANGGRAPH:
-        # TODO(day2): inject llm=ChatOpenAI(base_url=AIML, api_key=...) from engine/llm.py
-        raise NotImplementedError("langgraph adapter wiring lands once extras+keys are present")
+        # TODO: inject llm=ChatOpenAI(base_url=AIML, api_key=...) from engine/llm.py
+        raise NotImplementedError("langgraph adapter wiring is not enabled in this build")
     if spec.framework in (Framework.LETTA, Framework.CREWAI):
-        raise NotImplementedError("appeals adapter (Featherless open model) — Day 4")
+        raise NotImplementedError("appeals (open-model) adapter wiring is not enabled in this build")
 
     raise NotImplementedError(f"No adapter wiring yet for framework {spec.framework}")

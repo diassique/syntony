@@ -1,4 +1,4 @@
-"""L2 — Syntony engine (STUB, Day 2+).
+"""L2 — Syntony engine.
 
 Domain-independent runtime that turns the L1 protocol into running behavior on top of
 Band (L0): a base agent, a coordinator that walks the state machine, and the Band I/O

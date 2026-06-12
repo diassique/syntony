@@ -1,14 +1,12 @@
-# Core (Day 1)
+# Core
 pydantic>=2,<3
 python-dotenv>=1,<2
 
-# Band agentic mesh transport (L0). PyPI: band-sdk 1.0.0.
-# Core only for the Day-1 connectivity spike (tiny agents, no LLM reasoning).
+# Band agentic mesh transport (L0).
 band-sdk
 
 # Test
 pytest>=8,<9
 
-# --- Framework adapter extras (added per-agent on Day 2+ when reasoning is wired) ---
-# Confirmed available on band-sdk 1.0.0: langgraph, anthropic, pydantic-ai, crewai, letta, gemini.
-# Enable like: band-sdk[langgraph,anthropic,pydantic-ai]
+# Framework adapter extras are enabled per agent role, e.g.:
+#   band-sdk[langgraph,anthropic,pydantic-ai,letta]

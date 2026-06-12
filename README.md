@@ -28,13 +28,17 @@ L0  Band            transport (rooms, mentions, contacts, events, REST/WS) — e
 L1  protocol/       typed envelopes + conversation state machine (domain-independent)
 L2  engine/         ProtocolAgent base + Coordinator (FSM), recruit / escalate
 L3  domains/        domain packs: schema + policies + roles + thresholds
-L4  ui/             domain-independent dashboard (later)
+L4  ui/             domain-independent dashboard + live audit stream
 ```
 
-## Status
+## Getting started
 
-Day 1 scaffold. Environment, repo skeleton, protocol types, and a minimal Band
-connectivity spike. Engine, domains, and UI come later.
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # then fill in your Band + provider credentials
+pytest -q                     # run the test suite
+```
 
 ## License
 

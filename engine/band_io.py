@@ -8,7 +8,7 @@ plus one async ``emit`` that honors ``visibility``:
 
 ``tools`` is anything implementing Band's AgentToolsProtocol — the real ``AgentTools`` in
 production, or ``band.testing.FakeAgentTools`` in tests. We never import a concrete Band
-client here; we only call the confirmed tool methods (see NOTES_BAND.md).
+client here; we only call the documented Band tool methods.
 """
 
 from __future__ import annotations

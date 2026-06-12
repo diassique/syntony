@@ -1,6 +1,5 @@
-# Syntony — deployment compose (STUB, Day 5).
-# Will define one service per long-lived agent process plus the UI/stream service.
-# Each agent gets its Band creds via env_file (.env), never baked into the image.
-# Intentionally empty until the engine and agents exist.
+# Syntony — deployment composition.
+# One service per long-lived agent process, plus the UI/stream service.
+# Each agent receives its Band credentials via env_file (.env), never baked into the image.
 
 services: {}

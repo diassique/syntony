@@ -17,3 +17,10 @@ venv/
 # OS / editor
 .DS_Store
 *.swp
+
+# Internal working docs & throwaway spikes (kept locally, not published)
+STATE.md
+PLAN.md
+CLAUDE.md
+NOTES_BAND.md
+spikes/

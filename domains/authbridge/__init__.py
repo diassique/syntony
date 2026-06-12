@@ -1,4 +1,4 @@
-"""L3 domain pack — **AuthBridge**: cross-org prior authorization (STUB, Day 2+).
+"""L3 domain pack — **AuthBridge**: cross-org prior authorization.
 
 Clinic and payer accounts negotiate a prior-auth case in a shared Band room. This
 pack supplies the FHIR-shaped payload schema, medical-necessity policy + thresholds,

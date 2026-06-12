@@ -1,5 +1,6 @@
-"""L3 domain pack — **contracts** (PLACEHOLDER, not in Day-1/early scope).
+"""L3 domain pack — **contracts** (extension point).
 
-Second reference domain to prove Syntony is domain-independent. Empty for now; will
-mirror the authbridge structure (schema + policy + roles) when needed.
+A second domain pack lives here to keep the core honest about being domain-independent:
+the engine and protocol must not need changes to support a new domain. A pack mirrors
+``authbridge`` — ``schema`` + ``policy`` + ``roles`` — and is discovered the same way.
 """

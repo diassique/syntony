@@ -6,9 +6,8 @@ backs it and the L1 states it acts in. Names are meaningful — Band routes on t
 
 Model slugs target the **AI/ML API** gateway (`https://api.aimlapi.com/v1`) for the closed
 models (partner prize); the Appeals role runs an open model via **Featherless**.
-NOTE: exact gateway slugs are to be confirmed against the AI/ML API catalog before first
-live run (tracked in NOTES_BAND / PLAN). Current Anthropic IDs: claude-opus-4-8,
-claude-sonnet-4-6.
+NOTE: model slugs should be verified against the AI/ML API catalog. Current Anthropic
+IDs: claude-opus-4-8, claude-sonnet-4-6.
 """
 
 from __future__ import annotations
