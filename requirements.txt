@@ -5,6 +5,10 @@ python-dotenv>=1,<2
 # Band agentic mesh transport (L0).
 band-sdk
 
+# UI (L4 spectator dashboard)
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+
 # Test
 pytest>=8,<9
 
