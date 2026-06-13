@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: #07090f;
+  color: #e6e6e6;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* brand gradient text (violet → cyan = "tuning to the same frequency") */
+.brand-text {
+  background: linear-gradient(90deg, #a78bfa, #22d3ee);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* subtle glowing grid backdrop for the landing */
+.bg-grid {
+  background-image:
+    radial-gradient(60rem 30rem at 50% -10%, rgba(139, 92, 246, 0.18), transparent 70%),
+    radial-gradient(40rem 24rem at 90% 10%, rgba(34, 211, 238, 0.1), transparent 70%),
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+}
+
+/* dark scrollbars */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: #1c2334; border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: #2a3450; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes ping-slow {
+  0% { transform: scale(1); opacity: 0.6; }
+  75%, 100% { transform: scale(2.4); opacity: 0; }
+}
+.animate-ping-slow { animation: ping-slow 2.4s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-rise { animation: rise 0.35s ease-out both; }
