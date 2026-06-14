@@ -5,9 +5,14 @@ backs it and the L1 states it acts in. Names are meaningful — Band routes on t
 "Assistant"/"Bot" degrade routing.
 
 Model slugs target the **AI/ML API** gateway (`https://api.aimlapi.com/v1`) for the closed
-models (partner prize); the Appeals role runs an open model via **Featherless**.
-NOTE: model slugs should be verified against the AI/ML API catalog. Current Anthropic
-IDs: claude-opus-4-8, claude-sonnet-4-6.
+models (partner prize); the Appeals role runs an open model via **Featherless**. The engine
+binds these to a concrete client in `engine.llm` — agent code never sees a provider.
+Slugs VERIFIED LIVE against the AI/ML catalog (2026-06-13, see NOTES_AIML.md): they are
+**bare** (no `anthropic/`/`openai/` prefix) — `claude-opus-4-8`, `claude-sonnet-4-6`,
+`gpt-5.5-2026-04-23`. The `featherless/*` slug is our routing convention for the open-model
+role (separate provider, key not yet set) — verify against Featherless before that goes live.
+Per-role LLM knobs (reasoning_effort, temperature) live in `extra` so the engine can read
+them in `LLMConfig.from_role` without the role data depending on the LLM layer.
 """
 
 from __future__ import annotations
@@ -29,7 +34,8 @@ ROLES: dict[str, RoleSpec] = {
         display_name="Provider Intake",
         side=Side.PROVIDER,
         framework=Framework.LANGGRAPH,
-        model="openai/gpt-5.5",
+        model="gpt-5.5-2026-04-23",
+        extra={"reasoning_effort": "low"},   # cheap/fast intake (cost control, see engine.llm)
         acts_in=(State.FRAME, State.PROPOSE),
         system_prompt=(
             f"{_PROTOCOL_PRIMER}\n\n"
@@ -45,7 +51,7 @@ ROLES: dict[str, RoleSpec] = {
         display_name="Provider Counsel",
         side=Side.PROVIDER,
         framework=Framework.PYDANTIC_AI,
-        model="anthropic/claude-sonnet-4.6",
+        model="claude-sonnet-4-6",
         acts_in=(State.PROPOSE, State.REVISE, State.INFO),
         system_prompt=(
             f"{_PROTOCOL_PRIMER}\n\n"
@@ -61,7 +67,8 @@ ROLES: dict[str, RoleSpec] = {
         display_name="Payer Policy Reviewer",
         side=Side.PAYER,
         framework=Framework.PYDANTIC_AI,
-        model="anthropic/claude-opus-4.8",
+        model="claude-opus-4-8",
+        extra={"reasoning_effort": "high"},   # deepest review (downshifts to Haiku under debug=True)
         acts_in=(State.REVIEW, State.INFO, State.RECRUIT, State.ESCALATE, State.DECIDE),
         system_prompt=(
             f"{_PROTOCOL_PRIMER}\n\n"
