@@ -29,6 +29,13 @@ from fastapi.staticfiles import StaticFiles
 
 from band.client.rest import RestClient
 
+# Run as a script (`python ui/server.py`) puts ui/ on sys.path, not the repo root —
+# prepend the root so the local `control` package imports under systemd too.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from control.api import router as auth_router
+
 load_dotenv()
 
 REST_URL = os.environ.get("BAND_REST_URL", "https://app.band.ai")
@@ -45,6 +52,9 @@ _MENTION_TOKEN = re.compile(r"@\[\[[0-9a-f-]+\]\]\s*")
 _DIST = Path(__file__).parent / "web" / "dist"
 
 app = FastAPI(title="Syntony spectator")
+
+# Control-plane auth API (signup/login/me). Registered before the SPA catch-all mount.
+app.include_router(auth_router)
 
 
 def _client(prefix: str) -> RestClient | None:
