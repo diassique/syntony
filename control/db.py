@@ -30,8 +30,9 @@ def get_engine() -> Engine:
 
 
 def init_db(engine: Engine | None = None) -> None:
-    """Create all tables that don't yet exist (idempotent). Good enough for a fresh DB;
-    use Alembic once the schema starts evolving in production."""
+    """Create all tables that don't yet exist (idempotent). Used for offline/test DBs
+    (e.g. in-memory SQLite). **Production schema is managed by Alembic** (see ``alembic/``):
+    ``alembic revision --autogenerate -m "…"`` then ``alembic upgrade head``."""
     SQLModel.metadata.create_all(engine or get_engine())
 
 
