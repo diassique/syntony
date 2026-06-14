@@ -113,6 +113,7 @@ export default function Landing() {
           <div className="ml-auto flex items-center gap-6 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">
             <a href="#how" className="hidden transition-colors hover:text-ink sm:inline">How it works</a>
             <a href={GITHUB} target="_blank" rel="noreferrer" className="hidden transition-colors hover:text-ink sm:inline">GitHub</a>
+            <a href="#/login" className="transition-colors hover:text-ink">Sign in</a>
             <a href="#/live" className="rounded-md bg-pine px-3.5 py-2 text-bone transition-colors hover:bg-pine-deep">Live demo →</a>
           </div>
         </div>
