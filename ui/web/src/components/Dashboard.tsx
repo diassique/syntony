@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRoomStream } from '../useRoomStream'
 import { MessageCard } from './MessageCard'
-import { Logo } from './Logo'
+import { Wordmark } from './Logo'
 import type { Side } from '../types'
 
 // Clinic = pine, Payer = ink. (Matches the landing's two-node mesh.)
@@ -53,8 +53,7 @@ export default function Dashboard() {
     <div className="flex h-full flex-col bg-bone">
       <header className="flex items-center gap-3 border-b border-line bg-bone px-5 py-3">
         <a href="#/" className="flex items-center gap-2 transition-opacity hover:opacity-70">
-          <Logo size={22} className="text-ink" />
-          <span className="font-display text-base font-semibold tracking-tight text-ink">Syntony</span>
+          <Wordmark height={20} />
         </a>
         <span className="hidden font-mono text-[11px] text-ink-faint sm:inline">· each column = what that account actually sees</span>
         <span className="ml-auto flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 font-mono text-[11px] text-ink-soft">

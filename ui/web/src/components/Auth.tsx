@@ -4,7 +4,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError } from '../api'
 import { useAuth } from '../auth'
-import { Logo } from './Logo'
+import { Wordmark } from './Logo'
 
 export default function Auth({ mode }: { mode: 'login' | 'signup' }) {
   const { user, login, signup } = useAuth()
@@ -43,8 +43,7 @@ export default function Auth({ mode }: { mode: 'login' | 'signup' }) {
       <nav className="border-b border-line/70">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-4">
           <a href="#/" className="flex items-center gap-3">
-            <Logo size={24} className="text-ink" />
-            <span className="font-display text-[17px] font-semibold tracking-tight">Syntony</span>
+            <Wordmark height={22} />
           </a>
         </div>
       </nav>
