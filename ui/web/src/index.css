@@ -1,46 +1,78 @@
 @import "tailwindcss";
+/* self-hosted variable fonts — no external request */
+@import "@fontsource-variable/space-grotesk/index.css";
+@import "@fontsource-variable/geist-mono/index.css";
+
+/* ─── Clinical Bone — design tokens ───────────────────────────────────────
+   Light Swiss/clinical system. One owned accent (pine), one signal (coral).
+   Deliberately no violet/cyan, no gradient-as-crutch, no system font. */
+@theme {
+  --color-bone: #f4f5f2;        /* page — cool clinical off-white */
+  --color-paper: #ffffff;       /* raised surfaces */
+  --color-sunk: #eceee8;        /* recessed bands */
+  --color-ink: #0e1311;         /* near-black, faint green cast */
+  --color-ink-soft: #555c56;    /* secondary text */
+  --color-ink-faint: #8b918a;   /* tertiary / mono labels */
+  --color-line: #dcded6;        /* hairlines */
+  --color-pine: #0b5e4f;        /* primary accent / actions */
+  --color-pine-deep: #094a3f;
+  --color-coral: #ff5a3c;       /* signal — live / alert / edge cases only */
+
+  --font-display: "Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+}
 
 html, body, #root { height: 100%; }
 body {
   margin: 0;
-  background: #07090f;
-  color: #e6e6e6;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--color-bone);
+  color: var(--color-ink);
+  font-family: var(--font-display);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* brand gradient text (violet → cyan = "tuning to the same frequency") */
-.brand-text {
-  background: linear-gradient(90deg, #a78bfa, #22d3ee);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
+::selection { background: color-mix(in srgb, var(--color-pine) 22%, transparent); color: var(--color-ink); }
 
-/* subtle glowing grid backdrop for the landing */
-.bg-grid {
-  background-image:
-    radial-gradient(60rem 30rem at 50% -10%, rgba(139, 92, 246, 0.18), transparent 70%),
-    radial-gradient(40rem 24rem at 90% 10%, rgba(34, 211, 238, 0.1), transparent 70%),
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
-}
-
-/* dark scrollbars */
+/* light, unobtrusive scrollbars */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-thumb { background: #1c2334; border-radius: 8px; }
-*::-webkit-scrollbar-thumb:hover { background: #2a3450; }
+*::-webkit-scrollbar-thumb { background: #cfd2c9; border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: #b9bdb1; }
 *::-webkit-scrollbar-track { background: transparent; }
 
-@keyframes ping-slow {
-  0% { transform: scale(1); opacity: 0.6; }
-  75%, 100% { transform: scale(2.4); opacity: 0; }
+/* ─── Motion ──────────────────────────────────────────────────────────────
+   Scroll-reveal: [data-reveal] rises in once (stagger via inline transition-
+   delay). All motion is disabled under prefers-reduced-motion. */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-.animate-ping-slow { animation: ping-slow 2.4s cubic-bezier(0, 0, 0.2, 1) infinite; }
+[data-reveal].in { opacity: 1; transform: none; }
 
-@keyframes rise {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+/* coral underline that draws under the hero accent word */
+@keyframes draw { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.rule-draw { transform-origin: left; animation: draw 0.9s 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+/* resonance — concentric rings around the shared "frequency" */
+@keyframes resonate { 0% { transform: scale(0.35); opacity: 0.5; } 100% { transform: scale(1.7); opacity: 0; } }
+.ring { animation: resonate 3.4s ease-out infinite; }
+
+@keyframes softpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.livedot { animation: softpulse 1.9s ease-in-out infinite; }
+
+/* a packet traveling the clinic↔payer link */
+@keyframes travel { 0% { left: 6%; } 50% { left: 90%; } 100% { left: 6%; } }
+.packet { animation: travel 4.6s cubic-bezier(0.6, 0, 0.4, 1) infinite; }
+
+/* kept for the live dashboard */
+@keyframes ping-slow { 0% { transform: scale(1); opacity: 0.6; } 75%, 100% { transform: scale(2.4); opacity: 0; } }
+.animate-ping-slow { animation: ping-slow 2.4s cubic-bezier(0, 0, 0.2, 1) infinite; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .animate-rise { animation: rise 0.35s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] { opacity: 1; transform: none; transition: none; }
+  .rule-draw, .ring, .livedot, .packet, .animate-ping-slow, .animate-rise { animation: none; }
+  .ring { opacity: 0.16; }
+}

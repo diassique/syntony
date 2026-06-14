@@ -4,28 +4,29 @@ import { MessageCard } from './MessageCard'
 import { Logo } from './Logo'
 import type { Side } from '../types'
 
+// Clinic = pine, Payer = ink. (Matches the landing's two-node mesh.)
 const ACCENTS = [
-  { dot: 'bg-emerald-400', text: 'text-emerald-300', ring: 'ring-emerald-500/30', av: 'bg-emerald-500/15 text-emerald-300' },
-  { dot: 'bg-violet-400', text: 'text-violet-300', ring: 'ring-violet-500/30', av: 'bg-violet-500/15 text-violet-300' },
+  { dot: 'bg-pine', av: 'bg-pine/10 text-pine ring-1 ring-pine/30' },
+  { dot: 'bg-ink', av: 'bg-ink/8 text-ink ring-1 ring-ink/20' },
 ]
 
 function Column({ side, accent }: { side: Side; accent: (typeof ACCENTS)[number] }) {
   const count = side.items?.length ?? 0
   return (
-    <div className="flex min-h-0 flex-col bg-[#0a0e18]">
-      <h2 className={`sticky top-0 z-10 flex items-center gap-2.5 border-b border-[#161d2e] bg-[#0a0e18]/95 px-4 py-3 backdrop-blur`}>
-        <span className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold ring-1 ${accent.av} ${accent.ring}`}>
+    <div className="flex min-h-0 flex-col bg-bone">
+      <h2 className="sticky top-0 z-10 flex items-center gap-2.5 border-b border-line bg-bone/95 px-4 py-3 backdrop-blur">
+        <span className={`flex h-7 w-7 items-center justify-center rounded-lg font-mono text-xs font-bold ${accent.av}`}>
           {side.label[0]}
         </span>
-        <span className="text-sm font-semibold text-[#dbe3f4]">{side.label}</span>
+        <span className="text-sm font-semibold text-ink">{side.label}</span>
         <span className={`h-1.5 w-1.5 rounded-full ${accent.dot}`} />
-        <span className="ml-auto text-[11px] uppercase tracking-wider text-[#5c6a85]">sees {count}</span>
+        <span className="ml-auto font-mono text-[11px] uppercase tracking-wider text-ink-faint">sees {count}</span>
       </h2>
       <div className="flex flex-col gap-2.5 overflow-y-auto px-4 py-3.5">
         {side.error ? (
-          <p className="py-2 text-[13px] italic text-red-400">{side.error}</p>
+          <p className="py-2 text-[13px] italic text-red-500">{side.error}</p>
         ) : count === 0 ? (
-          <p className="py-6 text-center text-[13px] italic text-[#5c6a85]">no messages visible to this account</p>
+          <p className="py-6 text-center text-[13px] italic text-ink-faint">no messages visible to this account</p>
         ) : (
           side.items!.map((m) => <MessageCard key={m.id} msg={m} />)
         )}
@@ -49,17 +50,17 @@ export default function Dashboard() {
   const sides = state?.sides ?? []
 
   return (
-    <div className="flex h-full flex-col bg-[#07090f]">
-      <header className="flex items-center gap-3 border-b border-[#161d2e] px-5 py-3">
-        <a href="#/" className="flex items-center gap-2 transition-opacity hover:opacity-80">
-          <Logo size={24} />
-          <span className="text-base font-semibold text-[#e6e6e6]">Syntony</span>
+    <div className="flex h-full flex-col bg-bone">
+      <header className="flex items-center gap-3 border-b border-line bg-bone px-5 py-3">
+        <a href="#/" className="flex items-center gap-2 transition-opacity hover:opacity-70">
+          <Logo size={22} className="text-ink" />
+          <span className="font-display text-base font-semibold tracking-tight text-ink">Syntony</span>
         </a>
-        <span className="hidden text-xs text-[#6b7790] sm:inline">· each column shows what that account actually sees</span>
-        <span className="ml-auto flex items-center gap-1.5 rounded-full border border-[#1c2740] bg-[#0c1322] px-2.5 py-1 text-[11px] text-[#9fb0cc]">
+        <span className="hidden font-mono text-[11px] text-ink-faint sm:inline">· each column = what that account actually sees</span>
+        <span className="ml-auto flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 font-mono text-[11px] text-ink-soft">
           <span className="relative flex h-2 w-2">
-            {connected && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 animate-ping-slow" />}
-            <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+            {connected && <span className="absolute inline-flex h-full w-full rounded-full bg-pine animate-ping-slow" />}
+            <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? 'bg-pine' : 'bg-ink-faint'}`} />
           </span>
           {connected ? 'live' : 'connecting…'}
         </span>
@@ -70,20 +71,20 @@ export default function Dashboard() {
           onBlur={() => setRoom(input.trim())}
           placeholder="Band room id"
           spellCheck={false}
-          className="w-[320px] rounded-lg border border-[#222d45] bg-[#0c1322] px-2.5 py-1.5 font-mono text-xs text-[#cdd8ee] outline-none transition-colors focus:border-violet-500/60"
+          className="w-[320px] rounded-lg border border-line bg-paper px-2.5 py-1.5 font-mono text-xs text-ink outline-none transition-colors focus:border-pine"
         />
       </header>
 
-      <div className="flex items-center justify-center gap-2 border-b border-[#11182680] bg-[#080b12] px-4 py-1.5 text-[11px] text-[#5c6a85]">
-        shared Band room · routed by <span className="text-[#8ad8a0]">@mention</span> ·
-        <span className="text-amber-300/90">thought</span> events stay private to the sender (the audit channel)
+      <div className="flex items-center justify-center gap-2 border-b border-line bg-sunk px-4 py-1.5 font-mono text-[11px] text-ink-faint">
+        shared Band room · routed by <span className="text-pine">@mention</span> ·
+        <span className="text-coral">thought</span> events stay private to the sender (the audit channel)
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-[#161d2e]">
+      <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-line">
         {sides.length ? (
           sides.map((s, i) => <Column key={s.prefix} side={s} accent={ACCENTS[i % ACCENTS.length]} />)
         ) : (
-          <div className="col-span-2 flex items-center justify-center text-sm italic text-[#5c6a85]">
+          <div className="col-span-2 flex items-center justify-center text-sm italic text-ink-faint">
             {room ? 'loading room…' : 'enter a room id above'}
           </div>
         )}
