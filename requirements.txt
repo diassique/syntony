@@ -5,9 +5,20 @@ python-dotenv>=1,<2
 # Band agentic mesh transport (L0).
 band-sdk
 
+# LLM gateway client — AI/ML API is OpenAI-compatible, so we use the OpenAI SDK
+# pointed at its base_url (see engine/llm.py). One client, any of 400+ models.
+openai>=1.40,<2
+
 # UI (L4 spectator dashboard)
 fastapi>=0.115,<1
 uvicorn>=0.30,<1
+
+# Control plane (users/orgs/auth/persistence/metering) — Postgres via SQLModel.
+sqlmodel>=0.0.21,<0.1
+psycopg2-binary>=2.9,<3      # PostgreSQL driver for SQLAlchemy
+argon2-cffi>=23,<25          # password hashing
+PyJWT>=2.8,<3                # session tokens
+cryptography>=42             # Fernet encryption for stored provider secrets (also a Band dep)
 
 # Test
 pytest>=8,<9
