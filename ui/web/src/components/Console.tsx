@@ -1,73 +1,534 @@
-/** Authenticated console — the post-login home. Shows the identity/org restored from
- * /me and is the surface future platform features (API keys, projects, runs) hang off. */
+/** Authenticated console — "Case Theater".
+ *
+ * A sidebar dashboard for one organization. Overview gives metrics + onboarding + recent
+ * cases; Cases lists every negotiation; opening one drops into the Theater — a two-lane
+ * provider↔payer timeline where your side's private agent reasoning is revealed (and locked
+ * to you) while the counterparty's reasoning shows only as a sealed placeholder. That
+ * asymmetry — visible at a glance — is the cross-org privacy moat. */
 
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { runsApi, type AuditEvent, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
-import { Logo } from './Logo'
+import { Wordmark } from './Logo'
+
+type View = 'overview' | 'cases' | 'settings'
 
 export default function Console() {
   const { user, org, logout } = useAuth()
-  if (!user) return null // App guards this route; this is just for type-narrowing.
+  const [runs, setRuns] = useState<RunSummary[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<View>('overview')
+  const [openRun, setOpenRun] = useState<string | null>(null)
+
+  useEffect(() => {
+    runsApi.list().then(setRuns).catch((e) => setError(String(e?.message || e)))
+  }, [])
+
+  if (!user) return null // App guards this route.
+
+  const open = (id: string) => setOpenRun(id)
+  const go = (v: View) => { setOpenRun(null); setView(v) }
 
   return (
-    <div className="min-h-full">
-      <nav className="border-b border-line/70 bg-bone/85 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-4">
-          <a href="#/" className="flex items-center gap-3">
-            <Logo size={24} className="text-ink" />
-            <span className="font-display text-[17px] font-semibold tracking-tight">Syntony</span>
-          </a>
-          <span className="rounded-md border border-line bg-paper px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">console</span>
-          <div className="ml-auto flex items-center gap-5 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">
-            <a href="#/live" className="transition-colors hover:text-ink">Live demo</a>
-            <button onClick={logout} className="transition-colors hover:text-coral">Sign out</button>
-          </div>
-        </div>
-      </nav>
-
-      <main className="mx-auto max-w-5xl px-6 py-12">
-        <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink-faint">Signed in</div>
-        <h1 className="mt-3 font-display text-4xl font-medium tracking-tight text-ink">
-          {greeting(user.name, user.email)}
-        </h1>
-        <p className="mt-3 max-w-xl text-ink-soft">
-          You're connected to the Syntony control plane. This is where your organization's projects,
-          agent credentials, runs and audit trail will live.
-        </p>
-
-        <div className="mt-10 grid gap-5 sm:grid-cols-2">
-          <Card label="Account">
-            <Row k="Name" v={user.name || '—'} />
-            <Row k="Email" v={user.email} mono />
-            <Row k="User ID" v={user.id} mono faint />
-          </Card>
-          <Card label="Organization">
-            {org ? (
-              <>
-                <Row k="Name" v={org.name} />
-                <Row k="Slug" v={org.slug} mono />
-                <Row k="Plan" v={org.plan} badge />
-              </>
-            ) : (
-              <p className="text-[14px] text-ink-soft">No organization on this account yet.</p>
-            )}
-          </Card>
-        </div>
-
-        <div className="mt-8 rounded-2xl border border-dashed border-line bg-sunk/40 p-6">
-          <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-faint">Coming next</div>
-          <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-ink-soft">
-            API keys · encrypted Band/LLM credentials · projects (domain packs) · live runs with a
-            per-org audit trail and usage metering — all already modeled in the control plane.
-          </p>
+    <div className="md:flex md:min-h-screen">
+      <Sidebar org={org} user={user} view={view} onNav={go} onSignOut={logout} />
+      <main className="min-w-0 flex-1 bg-bone">
+        <div className="mx-auto max-w-4xl px-6 py-10 sm:px-10">
+          {openRun ? (
+            <Theater runId={openRun} orgName={org?.name ?? 'Your organization'} onBack={() => setOpenRun(null)} />
+          ) : view === 'overview' ? (
+            <Overview user={user} org={org} runs={runs} error={error} onOpen={open} onSeeAll={() => go('cases')} />
+          ) : view === 'cases' ? (
+            <Cases runs={runs} error={error} onOpen={open} />
+          ) : (
+            <Settings user={user} org={org} />
+          )}
         </div>
       </main>
     </div>
   )
 }
 
-function greeting(name: string, email: string): string {
-  const who = name?.trim() || email.split('@')[0]
-  return `Hello, ${who}.`
+/* ─── sidebar ─────────────────────────────────────────────────────────────── */
+function Sidebar({ org, user, view, onNav, onSignOut }: {
+  org: { name: string; plan: string } | null
+  user: { email: string; name: string }
+  view: View
+  onNav: (v: View) => void
+  onSignOut: () => void
+}) {
+  const items: { id: View; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'cases', label: 'Cases' },
+    { id: 'settings', label: 'Settings' },
+  ]
+  return (
+    <aside className="border-b border-line bg-paper/70 backdrop-blur md:sticky md:top-0 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:border-b-0 md:border-r">
+      <div className="flex items-center gap-2.5 px-5 py-5">
+        <a href="#/" className="flex items-center">
+          <Wordmark height={22} />
+        </a>
+        <span className="rounded-md border border-line px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-ink-faint">console</span>
+      </div>
+
+      {org && (
+        <div className="mx-5 mb-4 rounded-xl border border-line bg-bone/60 px-3.5 py-3">
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-pine/10 font-mono text-[12px] font-bold text-pine ring-1 ring-pine/25">
+              {org.name.slice(0, 1).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-semibold leading-tight">{org.name}</div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-pine">{org.plan} plan</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <nav className="flex gap-1 px-3 md:flex-col">
+        {items.map((it) => (
+          <button key={it.id} onClick={() => onNav(it.id)}
+            className={`flex-1 rounded-lg px-3 py-2 text-left font-mono text-[12px] uppercase tracking-[0.1em] transition-colors md:flex-none ${
+              view === it.id ? 'bg-pine/10 text-pine' : 'text-ink-soft hover:bg-sunk/60 hover:text-ink'
+            }`}>
+            {it.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="mt-auto hidden border-t border-line px-5 py-4 md:block">
+        <div className="truncate font-mono text-[11px] text-ink-soft">{user.email}</div>
+        <div className="mt-2 flex items-center gap-4 font-mono text-[11px] uppercase tracking-[0.1em]">
+          <a href="#/live" className="text-ink-soft transition-colors hover:text-ink">Live demo</a>
+          <button onClick={onSignOut} className="text-ink-soft transition-colors hover:text-coral">Sign out</button>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+/* ─── overview ────────────────────────────────────────────────────────────── */
+function Overview({ user, org, runs, error, onOpen, onSeeAll }: {
+  user: { name: string; email: string }
+  org: { name: string } | null
+  runs: RunSummary[] | null
+  error: string | null
+  onOpen: (id: string) => void
+  onSeeAll: () => void
+}) {
+  const m = useMetrics(runs)
+  return (
+    <>
+      <Kicker>{org ? org.name : 'Signed in'}</Kicker>
+      <h1 className="mt-3 font-display text-4xl font-medium tracking-tight text-ink">
+        Hello, {user.name?.trim() || user.email.split('@')[0]}.
+      </h1>
+
+      <Quickstart hasRuns={!!runs && runs.length > 0} onOpenLatest={() => runs && runs[0] && onOpen(runs[0].id)} />
+
+      {error && <Banner>{error}</Banner>}
+
+      <div className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+        <Metric label="Cases" value={m.cases} />
+        <Metric label="Approval rate" value={m.approvalRate} suffix="%" dim={m.decided === 0} />
+        <Metric label="Avg turns" value={m.avgTurns} oneDecimal />
+        <Metric label="Private notes" value={m.privateEvents} accent />
+      </div>
+
+      <div className="mt-10 mb-4 flex items-baseline justify-between">
+        <h2 className="font-display text-xl font-semibold tracking-tight">Recent cases</h2>
+        {runs && runs.length > 3 && (
+          <button onClick={onSeeAll} className="font-mono text-[11px] uppercase tracking-[0.12em] text-pine hover:text-pine-deep">View all →</button>
+        )}
+      </div>
+      <CaseList runs={runs ? runs.slice(0, 4) : null} onOpen={onOpen} />
+    </>
+  )
+}
+
+function Quickstart({ hasRuns, onOpenLatest }: { hasRuns: boolean; onOpenLatest: () => void }) {
+  const KEY = 'syntony.console.quickstart'
+  const [dismissed, setDismissed] = useState(() => localStorage.getItem(KEY) === '1')
+  if (dismissed) return null
+  const close = () => { localStorage.setItem(KEY, '1'); setDismissed(true) }
+  return (
+    <div className="mt-7 rounded-2xl border border-pine/25 bg-pine/[0.04] p-5">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-pine">Quickstart</span>
+        <button onClick={close} className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint hover:text-ink">dismiss</button>
+      </div>
+      <ol className="mt-4 grid gap-3 sm:grid-cols-3">
+        <Step n="1" done title="Organization connected" body="Your side is on the mesh with an encrypted agent credential." />
+        <Step n="2" title={hasRuns ? 'Open a case' : 'Run your first case'}
+          body={hasRuns ? 'See a real provider↔payer negotiation, end to end.' : 'Launch run_all.py — it appears here, audited for you.'} />
+        <Step n="3" title="Privacy by design" body="You see every message, but only your own agents' private reasoning." />
+      </ol>
+      {hasRuns && (
+        <button onClick={onOpenLatest}
+          className="mt-4 rounded-lg bg-pine px-4 py-2 text-[13px] font-medium text-bone transition-colors hover:bg-pine-deep">
+          Open latest case →
+        </button>
+      )}
+    </div>
+  )
+}
+
+function Step({ n, title, body, done }: { n: string; title: string; body: string; done?: boolean }) {
+  return (
+    <li className="flex gap-3">
+      <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] ${
+        done ? 'bg-pine text-bone' : 'border border-pine/40 text-pine'}`}>
+        {done ? '✓' : n}
+      </span>
+      <div>
+        <div className="text-[13px] font-semibold leading-tight">{title}</div>
+        <div className="mt-1 text-[12px] leading-snug text-ink-soft">{body}</div>
+      </div>
+    </li>
+  )
+}
+
+/* ─── cases ───────────────────────────────────────────────────────────────── */
+function Cases({ runs, error, onOpen }: { runs: RunSummary[] | null; error: string | null; onOpen: (id: string) => void }) {
+  return (
+    <>
+      <Kicker>Audit</Kicker>
+      <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">Cases</h1>
+      <p className="mt-3 max-w-xl text-ink-soft">Every prior-authorization negotiation your organization took part in, scoped to what your side is allowed to see.</p>
+      {error && <Banner>{error}</Banner>}
+      <div className="mt-8"><CaseList runs={runs} onOpen={onOpen} /></div>
+    </>
+  )
+}
+
+function CaseList({ runs, onOpen }: { runs: RunSummary[] | null; onOpen: (id: string) => void }) {
+  if (!runs) return <p className="font-mono text-[12px] text-ink-faint">Loading cases…</p>
+  if (runs.length === 0)
+    return (
+      <div className="rounded-2xl border border-dashed border-line bg-sunk/40 p-8 text-center">
+        <div className="font-display text-lg font-semibold">No cases yet</div>
+        <p className="mx-auto mt-2 max-w-sm text-[14px] text-ink-soft">Launch a negotiation with <code className="font-mono text-ink">run_all.py</code> and it will appear here, audited for your organization.</p>
+      </div>
+    )
+  return (
+    <div className="space-y-2.5">
+      {runs.map((r, i) => (
+        <button key={r.id} onClick={() => onOpen(r.id)} style={{ animationDelay: `${i * 50}ms` }}
+          className="animate-rise group flex w-full items-center gap-4 rounded-xl border border-line bg-paper px-5 py-4 text-left transition-all hover:border-pine/40 hover:shadow-[0_12px_30px_-22px_rgba(14,19,17,0.5)]">
+          <StatusDot status={r.status} />
+          <div className="min-w-0">
+            <div className="truncate font-display text-[15px] font-semibold">{caseTitle(r.case_name)}</div>
+            <div className="font-mono text-[11px] text-ink-faint">{fmtTime(r.started_at)} · {r.turns} turns</div>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <OutcomeBadge outcome={r.outcome} />
+            <span className="hidden font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint sm:inline">{r.events} msgs</span>
+            {r.private_events > 0 && <LockChip n={r.private_events} />}
+            <span className="font-mono text-ink-faint transition-transform group-hover:translate-x-0.5">→</span>
+          </div>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/* ─── theater (the wow) ───────────────────────────────────────────────────── */
+function Theater({ runId, orgName, onBack }: { runId: string; orgName: string; onBack: () => void }) {
+  const [detail, setDetail] = useState<RunDetail | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    setDetail(null)
+    runsApi.get(runId).then(setDetail).catch((e) => setError(String(e?.message || e)))
+  }, [runId])
+
+  // group events by turn (room message + my private reasoning); derive which side is "me".
+  // Hooks must run unconditionally, so compute before any early return.
+  const turns = useMemo(() => groupByTurn(detail?.events ?? []), [detail])
+  const mySide = useMemo(() => {
+    const ev = detail?.events ?? []
+    const mine = ev.find((e) => e.visibility === 'private_event')
+    return sideOf(mine?.author ?? ev[0]?.author ?? 'provider')
+  }, [detail])
+  const counterparty = mySide === 'provider' ? 'the payer' : 'the provider'
+
+  const back = (
+    <button onClick={onBack} className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft transition-colors hover:text-ink">← All cases</button>
+  )
+  if (error) return <div>{back}<Banner>{error}</Banner></div>
+  if (!detail) return <div>{back}<p className="mt-6 font-mono text-[12px] text-ink-faint">Loading case…</p></div>
+
+  const { run } = detail
+
+  return (
+    <div>
+      {back}
+      <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <Kicker>Case · prior authorization</Kicker>
+          <h1 className="mt-2 font-display text-3xl font-medium tracking-tight text-ink">{caseTitle(run.case_name)}</h1>
+        </div>
+        <DecisionBadge outcome={run.outcome} state={run.final_state} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-faint">
+        <span>{run.turns} turns</span><span>·</span>
+        <span>{fmtTime(run.started_at)}</span><span>·</span>
+        <span>{run.events} messages</span><span>·</span>
+        <span className="text-coral">{run.private_events} private to you</span>
+      </div>
+
+      <Lanes mySide={mySide} myOrg={orgName} />
+
+      <ol className="relative mt-2">
+        {/* the spine */}
+        <div className="pointer-events-none absolute bottom-2 left-[7px] top-2 w-px bg-line sm:left-1/2 sm:-translate-x-1/2" />
+        {turns.map((t, i) => (
+          <TurnRow key={t.turn} t={t} mySide={mySide} myOrg={orgName} counterparty={counterparty} index={i} />
+        ))}
+      </ol>
+
+      <p className="mt-6 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+        <LockGlyph className="text-coral" /> private reasoning is scoped to its own organization — never the other side
+      </p>
+    </div>
+  )
+}
+
+function Lanes({ mySide, myOrg }: { mySide: string; myOrg: string }) {
+  const left = { label: mySide === 'provider' ? myOrg : 'Provider', dot: 'bg-pine', isYou: mySide === 'provider' }
+  const right = { label: mySide === 'payer' ? myOrg : 'Payer', dot: 'bg-ink', isYou: mySide === 'payer' }
+  return (
+    <div className="mt-8 mb-4 hidden items-center justify-between border-y border-line py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft sm:flex">
+      <span className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${left.dot}`} />{left.label}{left.isYou && <YouTag />}</span>
+      <span className="text-ink-faint">shared case room</span>
+      <span className="flex items-center gap-2">{right.label}{right.isYou && <YouTag />}<span className={`h-2 w-2 rounded-full ${right.dot}`} /></span>
+    </div>
+  )
+}
+
+type Turn = { turn: number; room?: AuditEvent; mine?: AuditEvent }
+
+function TurnRow({ t, mySide, myOrg, counterparty, index }: {
+  t: Turn; mySide: string; myOrg: string; counterparty: string; index: number
+}) {
+  const room = t.room
+  if (!room) return null
+  const side = sideOf(room.author)
+  const isMine = side === mySide
+  const isDecision = !!room.payload.outcome
+  const node = side === 'provider' ? 'bg-pine' : 'bg-ink'
+
+  const content = (
+    <div style={{ animationDelay: `${index * 70}ms` }} className="animate-rise space-y-2">
+      <div className={`rounded-xl border bg-paper px-4 py-3 ${isDecision ? 'border-pine/40 shadow-[0_10px_30px_-20px_rgba(11,94,79,0.7)]' : 'border-line'}`}>
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em]">
+          <span className="text-ink-soft">{prettyAuthor(room.author)}</span>
+          <span className="text-ink-faint">{room.kind.toLowerCase().replace(/_/g, ' ')}</span>
+          {room.payload.outcome && <OutcomeBadge outcome={room.payload.outcome} />}
+        </div>
+        <p className="mt-1.5 text-[14px] leading-relaxed text-ink">{room.payload.message || '—'}</p>
+      </div>
+      {isMine
+        ? t.mine && <PrivateNote text={t.mine.payload.reasoning || ''} org={myOrg} />
+        : <SealedNote org={counterparty} />}
+    </div>
+  )
+
+  return (
+    <li className="relative grid grid-cols-1 py-3 pl-7 sm:grid-cols-2 sm:gap-10 sm:pl-0">
+      <span className={`absolute left-[3px] top-5 h-3 w-3 rounded-full ring-4 ring-bone ${node} sm:left-1/2 sm:-translate-x-1/2`} />
+      <div className={isMine ? 'sm:col-start-1' : 'sm:col-start-2 sm:row-start-1'}>{content}</div>
+    </li>
+  )
+}
+
+function PrivateNote({ text, org }: { text: string; org: string }) {
+  return (
+    <div className="rounded-xl border border-coral/35 bg-coral/[0.05] px-4 py-2.5">
+      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-coral">
+        <LockGlyph /> private · only {org} sees this
+      </div>
+      <p className="mt-1 text-[13px] italic leading-relaxed text-ink-soft">{text || '—'}</p>
+    </div>
+  )
+}
+
+function SealedNote({ org }: { org: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-line bg-sunk/40 px-4 py-2.5">
+      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">
+        <LockGlyph /> private reasoning · sealed to {org}
+      </div>
+      <div className="mt-1.5 flex gap-1 opacity-60" aria-hidden>
+        {[40, 64, 28, 52].map((w, i) => <span key={i} style={{ width: w }} className="h-2 rounded-full bg-ink-faint/30" />)}
+      </div>
+    </div>
+  )
+}
+
+/* ─── settings ────────────────────────────────────────────────────────────── */
+function Settings({ user, org }: { user: { name: string; email: string; id: string }; org: { name: string; slug: string; plan: string } | null }) {
+  return (
+    <>
+      <Kicker>Settings</Kicker>
+      <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">Account &amp; organization</h1>
+      <div className="mt-8 grid gap-5 sm:grid-cols-2">
+        <Card label="Account">
+          <Row k="Name" v={user.name || '—'} />
+          <Row k="Email" v={user.email} mono />
+          <Row k="User ID" v={user.id} mono faint />
+        </Card>
+        <Card label="Organization">
+          {org ? (<>
+            <Row k="Name" v={org.name} />
+            <Row k="Slug" v={org.slug} mono />
+            <Row k="Plan" v={org.plan} badge />
+          </>) : <p className="text-[14px] text-ink-soft">No organization on this account yet.</p>}
+        </Card>
+      </div>
+      <div className="mt-8 rounded-2xl border border-dashed border-line bg-sunk/40 p-6">
+        <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-ink-faint">Coming next</div>
+        <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-ink-soft">
+          API keys · encrypted Band/LLM credentials · team members · usage &amp; billing — all already modeled in the control plane.
+        </p>
+      </div>
+    </>
+  )
+}
+
+/* ─── shared bits ─────────────────────────────────────────────────────────── */
+function useMetrics(runs: RunSummary[] | null) {
+  return useMemo(() => {
+    const r = runs ?? []
+    const withOutcome = r.filter((x) => x.outcome)
+    const approvals = withOutcome.filter((x) => x.outcome === 'APPROVE').length
+    const cases = r.length
+    return {
+      cases,
+      decided: withOutcome.length,
+      approvalRate: withOutcome.length ? Math.round((approvals / withOutcome.length) * 100) : 0,
+      avgTurns: cases ? r.reduce((s, x) => s + x.turns, 0) / cases : 0,
+      privateEvents: r.reduce((s, x) => s + x.private_events, 0),
+    }
+  }, [runs])
+}
+
+function Metric({ label, value, suffix, oneDecimal, accent, dim }: {
+  label: string; value: number; suffix?: string; oneDecimal?: boolean; accent?: boolean; dim?: boolean
+}) {
+  const shown = useCountUp(value)
+  const text = dim ? '—' : (oneDecimal ? shown.toFixed(1) : Math.round(shown).toString())
+  return (
+    <div className="bg-paper px-5 py-6">
+      <div className={`font-mono text-[34px] font-medium leading-none tabular-nums tracking-tight ${accent ? 'text-coral' : 'text-ink'}`}>
+        {text}{!dim && suffix ? <span className="text-ink-faint">{suffix}</span> : null}
+      </div>
+      <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">{label}</div>
+    </div>
+  )
+}
+
+function useCountUp(target: number, duration = 850): number {
+  const [v, setV] = useState(0)
+  const raf = useRef(0)
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setV(target); return }
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      setV(target * (1 - Math.pow(1 - t, 3)))
+      if (t < 1) raf.current = requestAnimationFrame(tick)
+      else setV(target)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf.current)
+  }, [target, duration])
+  return v
+}
+
+function OutcomeBadge({ outcome }: { outcome: string | null }) {
+  if (!outcome) return null
+  const approve = outcome === 'APPROVE'
+  return (
+    <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] ${
+      approve ? 'bg-pine/10 text-pine' : 'bg-coral/10 text-coral'}`}>
+      {approve ? 'approved' : outcome.toLowerCase()}
+    </span>
+  )
+}
+
+function DecisionBadge({ outcome, state }: { outcome: string | null; state: string | null }) {
+  if (!outcome) return <span className="rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">{state ?? '—'}</span>
+  const approve = outcome === 'APPROVE'
+  return (
+    <span className={`flex items-center gap-2 rounded-lg px-3.5 py-2 font-display text-sm font-semibold ${
+      approve ? 'bg-pine text-bone' : 'bg-coral text-bone'}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${approve ? 'bg-bone' : 'bg-bone'}`} />
+      {approve ? 'Approved' : outcome.charAt(0) + outcome.slice(1).toLowerCase()}
+    </span>
+  )
+}
+
+function LockChip({ n }: { n: number }) {
+  return (
+    <span className="flex items-center gap-1 rounded-md border border-coral/40 bg-coral/5 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-coral">
+      <LockGlyph /> {n}
+    </span>
+  )
+}
+
+function LockGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" className={className} aria-hidden>
+      <rect x="5" y="11" width="14" height="9" rx="2" fill="currentColor" opacity="0.18" />
+      <rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 11V8a4 4 0 1 1 8 0v3" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  )
+}
+
+function YouTag() {
+  return <span className="rounded bg-pine/15 px-1 py-0.5 text-[8px] font-bold text-pine">YOU</span>
+}
+
+function StatusDot({ status }: { status: string }) {
+  const c = status === 'succeeded' ? 'bg-pine' : status === 'failed' ? 'bg-coral' : 'bg-ink-faint'
+  return <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${c}`} />
+}
+
+function Kicker({ children }: { children: React.ReactNode }) {
+  return <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink-faint">{children}</div>
+}
+
+function Banner({ children }: { children: React.ReactNode }) {
+  return <div className="mt-6 rounded-md border border-coral/40 bg-coral/5 px-3 py-2 text-[13px] text-coral">{children}</div>
+}
+
+function caseTitle(s: string): string {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function prettyAuthor(a: string): string {
+  return a.split('.').map((p) => p.replace(/\b\w/g, (c) => c.toUpperCase())).join(' · ')
+}
+
+function sideOf(author: string): string {
+  return author.split('.')[0]
+}
+
+function groupByTurn(events: AuditEvent[]): Turn[] {
+  const by = new Map<number, Turn>()
+  for (const e of events) {
+    const slot = by.get(e.turn) ?? { turn: e.turn }
+    if (e.visibility === 'private_event') slot.mine = e
+    else slot.room = e
+    by.set(e.turn, slot)
+  }
+  return [...by.values()].sort((a, b) => a.turn - b.turn)
+}
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
 function Card({ label, children }: { label: string; children: React.ReactNode }) {

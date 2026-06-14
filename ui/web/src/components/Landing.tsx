@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
-import { Logo } from './Logo'
+import { Wordmark } from './Logo'
+import { useAuth } from '../auth'
 
 const GITHUB = 'https://github.com/diassique/syntony'
 
@@ -18,9 +19,9 @@ const STEPS = [
 ]
 
 const MOAT = [
-  { t: 'Cross-org consent', d: 'Two independent organizations connect through a bilateral, approved contact — not a shared login or a brittle point-to-point integration.' },
-  { t: 'Mention-scoped privacy', d: "Each side keeps its internal strategy on a private event channel the counterparty never sees — even inside the shared room." },
-  { t: 'Unified audit trail', d: 'Every message, tool call and decision is recorded as a typed, replayable event stream — for both parties, by construction.' },
+  { t: 'Denials caught before they happen', d: 'A coding agent fixes the missing codes, unsigned orders and absent documents that cause most denials — before the request ever reaches the payer.' },
+  { t: 'A real negotiation, not a black box', d: "The payer's reviewer asks only for what's missing and your side answers automatically. Borderline cases go to a human — not an automatic denial." },
+  { t: 'Privacy and audit by construction', d: "Every message and decision is recorded for both organizations, while each side's internal notes stay private — never exposed to the other." },
 ]
 
 const TECH = ['Band agentic mesh', 'AI/ML API', 'Anthropic Claude', 'LangGraph', 'Pydantic AI', 'Letta', 'Featherless', 'PostgreSQL']
@@ -57,7 +58,7 @@ function HeroDiagram() {
     <div data-reveal style={{ transitionDelay: '120ms' }}>
       <div className="rounded-2xl border border-line bg-paper p-6 shadow-[0_1px_0_rgba(14,19,17,0.03),0_30px_60px_-40px_rgba(14,19,17,0.35)]">
         <div className="mb-6 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">
-          <span>shared band room</span>
+          <span>live case room</span>
           <span className="flex items-center gap-1.5"><span className="livedot h-1.5 w-1.5 rounded-full bg-coral" /> live</span>
         </div>
 
@@ -103,17 +104,19 @@ function HeroDiagram() {
 
 export default function Landing() {
   useReveal()
+  const { user, loading } = useAuth()
   return (
     <div className="min-h-full">
       {/* nav */}
       <nav className="sticky top-0 z-20 border-b border-line/70 bg-bone/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-4">
-          <Logo size={24} className="text-ink" />
-          <span className="font-display text-[17px] font-semibold tracking-tight">Syntony</span>
+          <Wordmark height={22} />
           <div className="ml-auto flex items-center gap-6 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">
             <a href="#how" className="hidden transition-colors hover:text-ink sm:inline">How it works</a>
             <a href={GITHUB} target="_blank" rel="noreferrer" className="hidden transition-colors hover:text-ink sm:inline">GitHub</a>
-            <a href="#/login" className="transition-colors hover:text-ink">Sign in</a>
+            {!loading && (user
+              ? <a href="#/app" className="font-semibold text-pine transition-colors hover:text-pine-deep">Go to console →</a>
+              : <a href="#/login" className="transition-colors hover:text-ink">Sign in</a>)}
             <a href="#/live" className="rounded-md bg-pine px-3.5 py-2 text-bone transition-colors hover:bg-pine-deep">Live demo →</a>
           </div>
         </div>
@@ -124,7 +127,7 @@ export default function Landing() {
         <div className="lg:col-span-7">
           <div data-reveal className="mb-6 flex items-center gap-2">
             <span className="livedot h-1.5 w-1.5 rounded-full bg-coral" />
-            <Kicker>Cross-org agent coordination · Regulated</Kicker>
+            <Kicker>Prior authorization · Automated</Kicker>
           </div>
           <h1 data-reveal style={{ transitionDelay: '60ms' }} className="font-display text-5xl font-medium leading-[0.98] tracking-[-0.02em] text-ink sm:text-6xl lg:text-[4.5rem]">
             Prior authorization,<br />settled in{' '}
@@ -134,9 +137,10 @@ export default function Landing() {
             </span>.
           </h1>
           <p data-reveal style={{ transitionDelay: '120ms' }} className="mt-8 max-w-xl text-lg leading-relaxed text-ink-soft">
-            Syntony is a coordination protocol for AI agents that work <span className="text-ink">across organizations</span>.
-            A clinic and a payer settle one case in a shared room — without passing raw PHI, with a human on the
-            edge cases, and a full audit trail.
+            Syntony puts an AI agent on the <span className="text-ink">provider's side</span> and the{' '}
+            <span className="text-ink">payer's side</span>. They exchange the request, fix the errors that cause
+            denials, and reach a decision — with a human on the edge cases and a full audit trail.
+            Your staff stop chasing faxes and phone queues.
           </p>
           <div data-reveal style={{ transitionDelay: '180ms' }} className="mt-9 flex flex-wrap items-center gap-3">
             <a href="#/live" className="rounded-lg bg-pine px-5 py-3 font-medium text-bone transition-colors hover:bg-pine-deep">Watch it live →</a>
@@ -168,7 +172,7 @@ export default function Landing() {
         <div data-reveal>
           <Kicker>§ 01 — How a case flows</Kicker>
           <h2 className="mt-4 max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-4xl">
-            Heterogeneous agents, two organizations, one negotiated outcome.
+            From the order to a decision — no fax, no hold music.
           </h2>
         </div>
         <div className="mt-14 grid gap-px border-t border-line sm:grid-cols-2 lg:grid-cols-4">
@@ -187,11 +191,11 @@ export default function Landing() {
       <section className="border-y border-line bg-sunk">
         <div className="mx-auto max-w-6xl px-6 py-24">
           <div data-reveal>
-            <Kicker>§ 02 — Why it needs a mesh</Kicker>
+            <Kicker>§ 02 — Why it's different</Kicker>
             <h2 className="mt-4 max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-4xl">
-              Remove the mesh and the whole thing collapses.
+              More than a submission portal.
             </h2>
-            <p className="mt-3 max-w-xl text-ink-soft">Consent, privacy and audit aren't features bolted on — they're the reason this can't be a single linear pipeline.</p>
+            <p className="mt-3 max-w-xl text-ink-soft">A clearinghouse form gets submitted and disappears into a queue. Here, both sides' agents actually work the case — and every step is on the record.</p>
           </div>
           <div className="mt-12 grid gap-6 md:grid-cols-3">
             {MOAT.map((m, i) => (
@@ -208,7 +212,7 @@ export default function Landing() {
       {/* CTA */}
       <section className="mx-auto max-w-6xl px-6 py-24 text-center" data-reveal>
         <h2 className="mx-auto max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-4xl">
-          See two organizations negotiate a case, live.
+          Watch a prior-auth case settle, live.
         </h2>
         <div className="mt-8 flex items-center justify-center gap-3">
           <a href="#/live" className="rounded-lg bg-pine px-6 py-3 font-medium text-bone transition-colors hover:bg-pine-deep">Open the live demo →</a>
@@ -229,7 +233,7 @@ export default function Landing() {
       {/* footer */}
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-6 py-8 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-faint sm:flex-row">
-          <div className="flex items-center gap-2 text-ink-soft"><Logo size={18} className="text-ink" /> Syntony · MIT · agents tuning to the same frequency</div>
+          <div className="flex items-center gap-2 text-ink-soft"><Wordmark height={15} /> <span>· prior authorization for providers &amp; payers · MIT</span></div>
           <div className="flex items-center gap-6">
             <a href="#/live" className="transition-colors hover:text-ink">Live demo</a>
             <a href={GITHUB} target="_blank" rel="noreferrer" className="transition-colors hover:text-ink">GitHub</a>
