@@ -52,14 +52,35 @@ def test_duplicate_email_is_rejected(sess):
         service.signup(sess, email="a@b.com", password="other123")
 
 
-def test_login_issues_scoped_token_and_rejects_bad_password(sess):
+def test_login_returns_active_user_and_rejects_bad_password(sess):
     user, org = service.signup(sess, email="a@b.com", password="secret123")
     assert service.login(sess, email="a@b.com", password="wrong") is None
-    res = service.login(sess, email="a@b.com", password="secret123")
-    assert res is not None
-    got_user, token = res
-    claims = security.verify_token(token)
-    assert claims and claims["sub"] == got_user.id and claims["org"] == org.id
+    got = service.login(sess, email="a@b.com", password="secret123")
+    assert got is not None and got.id == user.id
+    assert service.primary_org_id(sess, user.id) == org.id
+
+
+def test_refresh_session_rotates_and_revokes(sess):
+    user, org = service.signup(sess, email="a@b.com", password="secret123")
+    raw, rec = service.create_session(sess, user=user, org_id=org.id)
+    # rotation: the old token is invalidated, a new one issued for the same user/org
+    rotated = service.rotate_session(sess, raw)
+    assert rotated is not None
+    new_raw, got_user, org_id = rotated
+    assert got_user.id == user.id and org_id == org.id and new_raw != raw
+    assert service.rotate_session(sess, raw) is None        # old token is dead (one-time use)
+    # revoke the new one → no longer usable
+    assert service.revoke_session(sess, new_raw) is True
+    assert service.rotate_session(sess, new_raw) is None
+    assert service.revoke_session(sess, new_raw) is False    # idempotent
+
+
+def test_revoke_all_sessions(sess):
+    user, org = service.signup(sess, email="a@b.com", password="secret123")
+    service.create_session(sess, user=user, org_id=org.id)
+    service.create_session(sess, user=user, org_id=org.id)
+    assert service.revoke_all_sessions(sess, user_id=user.id) == 2
+    assert service.revoke_all_sessions(sess, user_id=user.id) == 0
 
 
 def test_api_key_verify_and_revoke(sess):

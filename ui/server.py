@@ -34,7 +34,7 @@ from band.client.rest import RestClient
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from control.api import router as auth_router
+from control.api import router as auth_router, runs_router
 
 load_dotenv()
 
@@ -53,8 +53,9 @@ _DIST = Path(__file__).parent / "web" / "dist"
 
 app = FastAPI(title="Syntony spectator")
 
-# Control-plane auth API (signup/login/me). Registered before the SPA catch-all mount.
+# Control-plane API (auth + org-scoped run audit). Registered before the SPA catch-all mount.
 app.include_router(auth_router)
+app.include_router(runs_router)
 
 
 def _client(prefix: str) -> RestClient | None:

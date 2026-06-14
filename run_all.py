@@ -36,6 +36,7 @@ def main() -> None:
     ap.add_argument("--fresh", action="store_true", help="create a new room even if one is configured")
     ap.add_argument("--full", action="store_true", help="use the strong model tier (default: cheap Haiku)")
     ap.add_argument("--no-llm", action="store_true", help="deterministic narration, no LLM calls")
+    ap.add_argument("--no-persist", action="store_true", help="skip writing the run to the control-plane audit")
     args = ap.parse_args()
 
     rest_url = os.environ.get("BAND_REST_URL", "https://app.band.ai")
@@ -71,7 +72,33 @@ def main() -> None:
         print(f"  turn {e.turn} | {e.author} | {e.kind.value}{out}")
         print(f"      {e.payload.get('message', '')}")
     print(f"\nended: state={res.final_state.value}, turns={res.turns}, stop={res.stopped}")
+
+    if not args.no_persist:
+        _persist(args.case, room, res)
+
     print(f"watch it: https://syntony.live/?room={room}#/live  (or set SYNTONY_VIEW_ROOM={room} + restart syntony)")
+
+
+def _persist(case_name: str, room_id: str, res) -> None:
+    """Record the negotiation into the org-scoped control-plane audit (best-effort)."""
+    try:
+        from control import ingest, seed
+        from control.db import session as open_session
+
+        def author_side(author: str) -> str:
+            spec = ROLES.get(author)
+            return spec.side.value if spec else "neutral"
+
+        with open_session() as sess:
+            seed.seed_demo(sess)  # idempotent — ensures the Clinic/Payer orgs exist
+            side_to_org = seed.demo_side_orgs(sess)
+            run = ingest.persist_result(
+                sess, result=res, side_to_org=side_to_org, author_side=author_side,
+                case_name=case_name, room_id=room_id,
+            )
+        print(f"audit: persisted run {run.id} (sign in as clinic@demo.syntony / payer@demo.syntony)")
+    except Exception as e:  # noqa: BLE001 — persistence must never break the live demo
+        print(f"audit: skipped ({type(e).__name__}: {str(e)[:120]})")
 
 
 if __name__ == "__main__":

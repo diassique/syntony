@@ -95,6 +95,22 @@ class ApiKey(SQLModel, table=True):
     revoked_at: datetime | None = None
 
 
+class Session(SQLModel, table=True):
+    """A refresh-token session. We store only the sha256 of the opaque refresh token;
+    rotation revokes the old row and issues a new one. Revocation = setting ``revoked_at``."""
+
+    __tablename__ = "sessions"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    user_id: str = Field(foreign_key="users.id", index=True)
+    org_id: str | None = None
+    token_hash: str = Field(index=True, unique=True)  # sha256 of the opaque refresh token
+    user_agent: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    last_used_at: datetime = Field(default_factory=_now)
+    expires_at: datetime
+    revoked_at: datetime | None = None
+
+
 class Project(SQLModel, table=True):
     __tablename__ = "projects"
     __table_args__ = (UniqueConstraint("org_id", "slug", name="uq_project_org_slug"),)
@@ -140,6 +156,7 @@ class Run(SQLModel, table=True):
     case_name: str = ""
     status: str = Field(default=RunStatus.RUNNING.value)
     final_state: str | None = None
+    outcome: str | None = None  # the case's final decision (APPROVE/DENY/…), for metrics
     turns: int = 0
     room_id: str | None = None
     started_at: datetime = Field(default_factory=_now)

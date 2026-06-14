@@ -28,6 +28,11 @@ _ph = PasswordHasher()
 API_KEY_PREFIX = "syn"
 _JWT_ALG = "HS256"
 
+# Access tokens are short-lived and stateless; long-lived auth lives in a server-side
+# refresh-token session (revocable, rotated). See control.service / control.api.
+ACCESS_TTL_MINUTES = 15
+REFRESH_TTL_DAYS = 30
+
 
 # ---- passwords ----------------------------------------------------------------
 def hash_password(password: str) -> str:
@@ -49,13 +54,16 @@ def _jwt_secret() -> str:
     return secret
 
 
-def issue_token(*, user_id: str, org_id: str | None = None, ttl_hours: int = 24) -> str:
+def issue_token(*, user_id: str, org_id: str | None = None, ttl_minutes: int = ACCESS_TTL_MINUTES) -> str:
+    """Mint a short-lived stateless access token (JWT). Revocation is handled at the
+    refresh-session layer, so access tokens are intentionally brief."""
     now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {
         "sub": user_id,
         "org": org_id,
+        "typ": "access",
         "iat": now,
-        "exp": now + timedelta(hours=ttl_hours),
+        "exp": now + timedelta(minutes=ttl_minutes),
     }
     return jwt.encode(payload, _jwt_secret(), algorithm=_JWT_ALG)
 
@@ -78,6 +86,18 @@ def generate_api_key() -> tuple[str, str, str]:
 
 def hash_api_key(full_key: str) -> str:
     return hashlib.sha256(full_key.encode()).hexdigest()
+
+
+# ---- refresh tokens ------------------------------------------------------------
+def new_refresh_token() -> tuple[str, str]:
+    """Return ``(raw, token_hash)``. The raw opaque token is delivered to the client in an
+    httpOnly cookie and never stored; only its sha256 hash is persisted."""
+    raw = secrets.token_urlsafe(40)
+    return raw, hash_refresh(raw)
+
+
+def hash_refresh(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 # ---- provider-secret encryption (Fernet) --------------------------------------

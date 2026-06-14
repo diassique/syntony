@@ -8,7 +8,7 @@ writes that make a negotiation a billable, auditable unit. Functions take an ope
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, select
 
@@ -22,6 +22,7 @@ from .models import (
     Organization,
     Run,
     RunStatus,
+    Session as AuthSession,
     UsageRecord,
     User,
 )
@@ -59,13 +60,78 @@ def signup(sess: Session, *, email: str, password: str, name: str = "", org_name
     return user, org
 
 
-def login(sess: Session, *, email: str, password: str) -> tuple[User, str] | None:
-    """Verify credentials → ``(user, jwt)`` scoped to the user's first org, or ``None``."""
+def login(sess: Session, *, email: str, password: str) -> User | None:
+    """Verify credentials and return the active ``User`` (or ``None``). Token/session
+    issuance is the API layer's job (it owns the cookie + access-token response)."""
     user = sess.exec(select(User).where(User.email == email)).first()
     if not user or not user.is_active or not security.verify_password(password, user.password_hash):
         return None
-    m = sess.exec(select(Membership).where(Membership.user_id == user.id)).first()
-    return user, security.issue_token(user_id=user.id, org_id=m.org_id if m else None)
+    return user
+
+
+def primary_org_id(sess: Session, user_id: str) -> str | None:
+    """The org a user's session is scoped to (their first membership)."""
+    return sess.exec(select(Membership.org_id).where(Membership.user_id == user_id)).first()
+
+
+# ---- refresh-token sessions (server-side, revocable, rotated) ------------------
+def create_session(sess: Session, *, user: User, org_id: str | None, user_agent: str = ""
+                   ) -> tuple[str, AuthSession]:
+    """Open a refresh session. Returns ``(raw_refresh_token, record)``; only the hash is stored."""
+    raw, token_hash = security.new_refresh_token()
+    rec = AuthSession(user_id=user.id, org_id=org_id, token_hash=token_hash,
+                      user_agent=user_agent[:300],
+                      expires_at=_now() + timedelta(days=security.REFRESH_TTL_DAYS))
+    sess.add(rec)
+    sess.commit()
+    sess.refresh(rec)
+    return raw, rec
+
+
+def _live_session(sess: Session, raw: str) -> AuthSession | None:
+    rec = sess.exec(select(AuthSession).where(AuthSession.token_hash == security.hash_refresh(raw))).first()
+    if not rec or rec.revoked_at is not None or rec.expires_at <= _now():
+        return None
+    return rec
+
+
+def rotate_session(sess: Session, raw: str, *, user_agent: str = ""
+                   ) -> tuple[str, User, str | None] | None:
+    """Validate a refresh token, revoke it (rotation), and issue a fresh one. Returns
+    ``(new_raw_token, user, org_id)`` or ``None`` if the presented token is invalid."""
+    rec = _live_session(sess, raw)
+    if rec is None:
+        return None
+    user = sess.get(User, rec.user_id)
+    if user is None or not user.is_active:
+        return None
+    rec.revoked_at = _now()  # one-time use: the old token is dead the moment it's rotated
+    sess.add(rec)
+    new_raw, _ = create_session(sess, user=user, org_id=rec.org_id, user_agent=user_agent)
+    return new_raw, user, rec.org_id
+
+
+def revoke_session(sess: Session, raw: str) -> bool:
+    """Revoke a single session by its raw token (logout). Idempotent."""
+    rec = sess.exec(select(AuthSession).where(AuthSession.token_hash == security.hash_refresh(raw))).first()
+    if rec is None or rec.revoked_at is not None:
+        return False
+    rec.revoked_at = _now()
+    sess.add(rec)
+    sess.commit()
+    return True
+
+
+def revoke_all_sessions(sess: Session, *, user_id: str) -> int:
+    """Revoke every live session for a user (sign out everywhere). Returns count revoked."""
+    rows = sess.exec(
+        select(AuthSession).where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None))
+    ).all()
+    for r in rows:
+        r.revoked_at = _now()
+        sess.add(r)
+    sess.commit()
+    return len(rows)
 
 
 def create_api_key(sess: Session, *, org_id: str, name: str = "default") -> tuple[str, ApiKey]:
@@ -117,9 +183,14 @@ def start_run(sess: Session, *, org_id: str, project_id: str | None = None, case
 
 
 def record_event(sess: Session, *, run: Run, turn: int, author: str, kind: str,
-                 visibility: str, payload: dict) -> Event:
-    """Append one envelope to the durable audit trail (and never mutate it afterwards)."""
-    ev = Event(run_id=run.id, org_id=run.org_id, turn=turn, author=author, kind=kind,
+                 visibility: str, payload: dict, org_id: str | None = None) -> Event:
+    """Append one envelope to the durable audit trail (and never mutate it afterwards).
+
+    ``org_id`` defaults to the run's owning org. For a cross-org run the same envelope is
+    recorded once per org that may see it (a room message → both orgs; a private event →
+    only its author's org), so callers pass an explicit ``org_id`` per audited copy.
+    """
+    ev = Event(run_id=run.id, org_id=org_id or run.org_id, turn=turn, author=author, kind=kind,
                visibility=visibility, payload=payload)
     sess.add(ev)
     sess.commit()
@@ -137,9 +208,10 @@ def record_usage(sess: Session, *, org_id: str, run_id: str | None = None, kind:
 
 
 def finish_run(sess: Session, *, run: Run, status: str = RunStatus.SUCCEEDED.value,
-               final_state: str | None = None, turns: int = 0) -> Run:
+               final_state: str | None = None, turns: int = 0, outcome: str | None = None) -> Run:
     run.status = status
     run.final_state = final_state
+    run.outcome = outcome
     run.turns = turns
     run.ended_at = _now()
     sess.add(run)
