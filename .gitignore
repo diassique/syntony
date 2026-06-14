@@ -23,4 +23,8 @@ STATE.md
 PLAN.md
 CLAUDE.md
 NOTES_BAND.md
+NOTES_AIML.md
 spikes/
+
+# dev SQLite (control plane uses Postgres in prod)
+syntony.db
