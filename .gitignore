@@ -24,6 +24,9 @@ PLAN.md
 CLAUDE.md
 NOTES_BAND.md
 NOTES_AIML.md
+DOMAIN_PA.md
+COMPETITORS.md
+*.pdf
 spikes/
 
 # dev SQLite (control plane uses Postgres in prod)
