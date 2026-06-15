@@ -66,7 +66,7 @@ export default function Console() {
     <div className="md:flex md:min-h-screen">
       <Sidebar org={org} user={user} view={view} onNav={go} onSignOut={logout} />
       <main className="min-w-0 flex-1 bg-bone">
-        <div className="mx-auto max-w-4xl px-6 py-10 sm:px-10">
+        <div className="mx-auto max-w-5xl px-6 py-10 sm:px-10">
           {openRun ? (
             <Theater runId={openRun} orgName={org?.name ?? 'Your organization'}
               onBack={() => setOpenRun(null)} onComplete={refresh} />
