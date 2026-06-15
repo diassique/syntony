@@ -7,12 +7,11 @@ This module is domain-independent. It defines:
   side it represents, the framework + model that powers it, whether it streams its
   reasoning to the room, which L1 protocol states it acts in, and its system prompt.
   This is pure data — fully testable without any framework installed or any key.
-- ``build_adapter`` — turns a ``RoleSpec`` into a concrete Band framework adapter.
-  Adapters need their pip extra + a ``provider_key``, so imports happen lazily inside
-  this function. Per-framework construction is wired incrementally (see TODOs); the
-  framework/Band APIs are verified against the installed SDK before use.
-
-The actual run loop is Band's: ``Agent.create(adapter=build_adapter(spec, key), ...).run()``.
+- ``build_adapter`` — the OPTIONAL Band-native-adapter path (``Agent.create(adapter=…).run()``),
+  where Band itself drives the agent loop. It is **not** how this build runs frameworks and is
+  intentionally unimplemented (raises). Live framework execution happens in ``engine.frameworks``:
+  a role's turn is produced by a real **Pydantic AI** Agent or **LangGraph** StateGraph, with the
+  model served via the AI/ML gateway — see ``runner.llm_narrator``'s per-framework dispatch.
 """
 
 from __future__ import annotations

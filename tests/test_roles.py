@@ -29,6 +29,15 @@ def test_every_protocol_state_has_an_actor():
     assert covered == set(State), f"states with no role: {set(State) - covered}"
 
 
+def test_every_role_runs_on_a_wired_framework_or_human():
+    # Integrity guard: no role may claim a framework we don't actually execute. Live roles must
+    # map to a wired turn function (Pydantic AI / LangGraph); only the human has none.
+    from engine.frameworks import turn_fn
+    for rid, spec in ROLES.items():
+        assert spec.is_human or turn_fn(spec.framework.value) is not None, \
+            f"{rid}: framework {spec.framework.value!r} is not wired in engine.frameworks"
+
+
 def test_build_adapter_guards():
     human = ROLES["payer.medical_director"]
     with pytest.raises(ValueError):

@@ -31,6 +31,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from engine.coordinator import CaseContext, Move
+from engine.frameworks import turn_fn
 from engine.llm import LLMConfig, completion_kwargs, make_client
 from protocol import Envelope, Kind, State, Visibility
 
@@ -440,8 +441,21 @@ def llm_narrator(*, debug: bool = True) -> Narrator:
             "with exactly two string fields: `message` (1–2 sentences addressing the counterpart "
             "by role, no PHI) and `reasoning` (one brief sentence). Phrase the facts; never override them."
         )
+        cfg = LLMConfig.from_role(spec, debug=debug)
+        # Roles backed by a wired framework (Pydantic AI / LangGraph) run their turn THROUGH it;
+        # the model is served via the AI/ML gateway. Best-effort: fall through on any failure.
+        fw = turn_fn(spec.framework.value)
+        if fw is not None:
+            try:
+                out = fw(model=cfg.model, system_prompt=spec.system_prompt, user=user)
+                # A weak model can still bury/blob the message; run it through the same cleaner.
+                msg = _parse_turn(out.get("message", ""), fallback="")["message"]
+                if msg and not msg.startswith(("{", "[")):
+                    return {"message": msg, "reasoning": out.get("reasoning") or msg}
+            except Exception:  # noqa: BLE001 — framework hiccup → fall back to the gateway
+                pass
         try:
-            cfg = replace(LLMConfig.from_role(spec, debug=debug), response_format=AGENT_SCHEMA)
+            cfg = replace(cfg, response_format=AGENT_SCHEMA)
             kwargs = completion_kwargs(
                 cfg, [{"role": "system", "content": spec.system_prompt}, {"role": "user", "content": user}]
             )

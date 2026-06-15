@@ -32,11 +32,11 @@ const AGENTS = [
   { ch: 'CH1', role: 'Intake', side: 'provider', fw: 'LangGraph', fn: 'frames a FHIR-shaped request from the chart' },
   { ch: 'CH2', role: 'Eligibility & Benefits', side: 'provider', fw: 'Pydantic AI', fn: 'verifies coverage before anything goes out' },
   { ch: 'CH3', role: 'Counsel', side: 'provider', fw: 'Pydantic AI', fn: 'fixes the codes, signatures & docs that cause denials' },
-  { ch: 'CH4', role: 'Provider Appeals', side: 'provider', fw: 'Letta', fn: 'cures the cited denial reason and resubmits' },
+  { ch: 'CH4', role: 'Provider Appeals', side: 'provider', fw: 'Pydantic AI', fn: 'cures the cited denial reason and resubmits' },
   { ch: 'CH5', role: 'Reviewer', side: 'payer', fw: 'Pydantic AI', fn: 'checks medical-necessity policy; asks only for gaps' },
   { ch: 'CH6', role: 'Clinical Guidelines', side: 'payer', fw: 'Pydantic AI', fn: 'applies MCG/InterQual-style criteria, cites them' },
   { ch: 'CH7', role: 'Pharmacy & Formulary', side: 'payer', fw: 'LangGraph', fn: 'checks formulary tier & step-therapy for drugs' },
-  { ch: 'CH8', role: 'Compliance & Audit', side: 'payer', fw: 'CrewAI', fn: 'enforces minimum-necessary PHI & specific-reason' },
+  { ch: 'CH8', role: 'Compliance & Audit', side: 'payer', fw: 'Pydantic AI', fn: 'enforces minimum-necessary PHI & specific-reason' },
   { ch: 'CH9', role: 'Member Notification', side: 'payer', fw: 'LangGraph', fn: 'drafts the determination notice & appeal rights' },
   { ch: 'CH10', role: 'Medical Director', side: 'payer', fw: 'Human-in-the-loop', fn: 'adjudicates borderline cases an algorithm should not' },
 ]
@@ -48,7 +48,7 @@ const LAYERS = [
   { n: 'L4', t: 'Console', spec: 'multi-tenant control plane · audit', d: 'A per-organization audit theater — what you log into.' },
 ]
 
-const TECH = ['Band agentic mesh', 'AI/ML API', 'Anthropic Claude', 'LangGraph', 'Pydantic AI', 'CrewAI', 'Letta', 'PostgreSQL']
+const TECH = ['Band agentic mesh', 'AI/ML API', 'Anthropic Claude', 'GPT-5.5', 'LangGraph', 'Pydantic AI', 'PostgreSQL']
 
 /* ── motion: scroll-reveal ─────────────────────────────────────────────── */
 function useReveal() {
@@ -472,7 +472,7 @@ export default function Landing() {
       <section id="agents" className="mx-auto max-w-6xl px-6 py-20 lg:py-28">
         <Index n="§03" label="channels" />
         <h2 data-reveal className="mt-5 max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-[2.6rem]">Ten specialist agents. Two organizations. One protocol.</h2>
-        <p data-reveal className="mt-4 max-w-xl text-ink-soft">Each channel runs the framework that fits its job — heterogeneous by design, interoperable by contract. The mesh doesn't care who built whom.</p>
+        <p data-reveal className="mt-4 max-w-xl text-ink-soft">Each agent's reasoning runs on a real framework — <span className="text-ink">LangGraph</span> or <span className="text-ink">Pydantic AI</span> — with the model served through one AI/ML gateway. Heterogeneous by design, interoperable by contract.</p>
 
         <div data-reveal className="mt-12">
           {/* header row */}
