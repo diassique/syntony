@@ -27,7 +27,7 @@ from domains.authbridge.roles import ROLES
 from domains.authbridge.runner import llm_narrator, run_authbridge
 from domains.authbridge.schema import Urgency
 from engine.agent_base import Side
-from protocol import Envelope
+from protocol import Envelope, Kind, State, Visibility
 
 #: Default demo scenario: the deny→appeal→overturn golden case.
 DEFAULT_CASE = "humira_step_therapy_denied"
@@ -108,16 +108,21 @@ async def execute_live_run(run_id: str, case_name: str, *, full: bool = False) -
                                        side_to_org=side_to_org, author_side=_author_side)
 
     tools_for, room_id = _build_tools_for(f"live-{case_name}")
+    paused = False
     try:
         res = await run_authbridge(
             case_name, tools_for=tools_for, narrate=llm_narrator(debug=not full),
             case_id=f"live-{case_name}", on_turn=on_turn,
+            pause_states={State.ARBITER},  # a borderline case pauses for the human Medical Director
         )
-        status = RunStatus.SUCCEEDED.value if res.stopped == "terminal" else RunStatus.FAILED.value
+        paused = res.stopped == "paused"
         final_state = res.final_state.value if hasattr(res.final_state, "value") else str(res.final_state)
         outcome = next((e.payload.get("outcome") for e in reversed(res.history) if e.payload.get("outcome")), None)
         turns = res.turns
-    except Exception as e:  # noqa: BLE001 — always finish the run so the console stops polling
+        status = (RunStatus.AWAITING_HUMAN.value if paused
+                  else RunStatus.SUCCEEDED.value if res.stopped == "terminal"
+                  else RunStatus.FAILED.value)
+    except Exception as e:  # noqa: BLE001 — always settle the run so the console stops polling
         print(f"live_run: negotiation failed ({type(e).__name__}: {str(e)[:160]})")
         status, final_state, outcome, turns = RunStatus.FAILED.value, None, None, 0
 
@@ -125,11 +130,61 @@ async def execute_live_run(run_id: str, case_name: str, *, full: bool = False) -
         run = sess.get(Run, run_id)
         if run is None:
             return
-        if room_id:
-            run.room_id = room_id
+        run.room_id = room_id or run.room_id
+        if paused:
+            # leave the run open (no ended_at) awaiting the human decision; meter on completion.
+            run.status = status
+            run.final_state = final_state
+            run.turns = turns
             sess.add(run)
             sess.commit()
+            return
         for org_id in org_ids:
             service.record_usage(sess, org_id=org_id, run_id=run_id, kind="run", units=1)
         service.finish_run(sess, run=run, status=status, final_state=final_state,
                            turns=turns, outcome=outcome)
+
+
+def apply_human_decision(run_id: str, outcome: str) -> str:
+    """Resolve a paused (AWAITING_HUMAN) run with the human Medical Director's verdict: append
+    the decision to the audit trail and complete the run. ``outcome`` is "APPROVE" or "DENY".
+    Returns a short status string. Raises ValueError if the run isn't awaiting a decision."""
+    outcome = outcome.upper()
+    if outcome not in ("APPROVE", "DENY"):
+        raise ValueError(f"outcome must be APPROVE or DENY, got {outcome!r}")
+
+    with open_session() as sess:
+        run = sess.get(Run, run_id)
+        if run is None:
+            raise ValueError("run not found")
+        if run.status != RunStatus.AWAITING_HUMAN.value:
+            raise ValueError("run is not awaiting a human decision")
+
+        side_to_org = seed.demo_side_orgs(sess)
+        org_ids = list(dict.fromkeys(side_to_org.values()))
+
+        approved = outcome == "APPROVE"
+        message = ("Medical Director review: approved on clinical discretion; the borderline policy "
+                   "gap is documented for audit." if approved else
+                   "Medical Director review: the denial is upheld after clinical assessment.")
+        env = Envelope(
+            case_id=f"live-{run.case_name}",
+            turn=run.turns,
+            author="payer.medical_director",
+            kind=Kind.DECISION,
+            visibility=Visibility.ROOM,
+            payload={
+                "message": message,
+                "reasoning": f"Human Medical Director decided {outcome} (HITL).",
+                "outcome": outcome,
+                "pa_event": "DECISION_APPROVED" if approved else "DECISION_DENIED",
+                "hitl": True,
+            },
+        )
+        ingest.record_envelope(sess, run=run, env=env, org_ids=org_ids,
+                               side_to_org=side_to_org, author_side=_author_side)
+        for org_id in org_ids:
+            service.record_usage(sess, org_id=org_id, run_id=run_id, kind="run", units=1)
+        service.finish_run(sess, run=run, status=RunStatus.SUCCEEDED.value,
+                           final_state="DECIDE", turns=run.turns + 1, outcome=outcome)
+    return outcome

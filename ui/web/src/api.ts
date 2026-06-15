@@ -135,4 +135,22 @@ export const runsApi = {
   /** Kick off a live negotiation; returns the run id immediately (it streams in). */
   start: (caseName?: string) =>
     request<StartRunResult>('/api/runs/start', { method: 'POST', auth: true, body: caseName ? { case_name: caseName } : {} }),
+  /** Human-in-the-loop: the payer Medical Director resolves a paused borderline case. */
+  decide: (id: string, outcome: 'APPROVE' | 'DENY') =>
+    request<{ run_id: string; outcome: string; status: string }>(`/api/runs/${id}/decide`, { method: 'POST', auth: true, body: { outcome } }),
+}
+
+export interface AgentInfo {
+  id: string
+  name: string
+  side: 'provider' | 'payer' | 'neutral'
+  framework: string
+  model: string | null
+  acts_in: string[]
+  human: boolean
+}
+
+export const agentsApi = {
+  /** The agent roster powering the mesh (roles, frameworks, models). */
+  list: () => request<{ agents: AgentInfo[] }>('/api/agents', { auth: true }),
 }

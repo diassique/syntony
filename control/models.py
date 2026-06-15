@@ -50,6 +50,7 @@ class CredentialKind(str, Enum):
 
 class RunStatus(str, Enum):
     RUNNING = "running"
+    AWAITING_HUMAN = "awaiting_human"  # paused at a borderline case for a human (HITL) decision
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 

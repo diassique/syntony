@@ -7,12 +7,12 @@
  * asymmetry — visible at a glance — is the cross-org privacy moat. */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { runsApi, type AuditEvent, type RunDetail, type RunSummary } from '../api'
+import { runsApi, agentsApi, type AgentInfo, type AuditEvent, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
 import { Wordmark } from './Logo'
-import { Button, Select } from './ui'
+import { Badge, Button, Select } from './ui'
 
-type View = 'overview' | 'cases' | 'settings'
+type View = 'overview' | 'cases' | 'agents' | 'settings'
 
 export default function Console() {
   const { user, org, logout } = useAuth()
@@ -59,6 +59,8 @@ export default function Console() {
               onSeeAll={() => go('cases')} onRunCase={runLiveCase} starting={starting} />
           ) : view === 'cases' ? (
             <Cases runs={runs} error={error} onOpen={open} onRunCase={runLiveCase} starting={starting} />
+          ) : view === 'agents' ? (
+            <AgentsView />
           ) : (
             <Settings user={user} org={org} />
           )}
@@ -113,6 +115,7 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
   const items: { id: View; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'cases', label: 'Cases' },
+    { id: 'agents', label: 'Agents' },
     { id: 'settings', label: 'Settings' },
   ]
   return (
@@ -333,11 +336,13 @@ function CaseList({ runs, onOpen, onRunCase, starting }: {
                 {r.urgency === 'expedited' && <ExpeditedChip />}
               </div>
               <div className="font-mono text-[11px] text-ink-faint">
-                {running ? <span className="text-coral">running…</span> : fmtTime(r.started_at)} · {r.turns} turns
+                {running ? <span className="text-coral">running…</span>
+                  : r.status === 'awaiting_human' ? <span className="text-coral">awaiting review…</span>
+                  : fmtTime(r.started_at)} · {r.turns} turns
               </div>
             </div>
             <div className="ml-auto flex items-center gap-2">
-              {running ? <LivePill /> : <OutcomeBadge outcome={r.outcome} />}
+              {running ? <LivePill /> : r.status === 'awaiting_human' ? <AwaitingPill /> : <OutcomeBadge outcome={r.outcome} />}
               <span className="hidden font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint sm:inline">{r.events} msgs</span>
               {r.private_events > 0 && <LockChip n={r.private_events} />}
               <span className="font-mono text-ink-faint transition-transform group-hover:translate-x-0.5">→</span>
@@ -371,6 +376,44 @@ function LivePill() {
   )
 }
 
+/** Shown while a borderline case is paused for the human Medical Director. */
+function AwaitingPill() {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-coral/40 bg-coral/[0.06] px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-coral">
+      <span className="h-2 w-2 rounded-full bg-coral" /> Awaiting review
+    </span>
+  )
+}
+
+/** Human-in-the-loop decision panel: the payer's Medical Director approves or denies a
+ *  borderline case that the automated policy escalated. */
+function HitlPanel({ events, canDecide, deciding, onDecide }: {
+  events: AuditEvent[]; canDecide: boolean; deciding: boolean; onDecide: (o: 'APPROVE' | 'DENY') => void
+}) {
+  const esc = [...events].reverse().find((e) => e.visibility === 'room' && (e.payload.pa_event === 'ESCALATED_TO_MD' || e.payload.denial_reason))
+  return (
+    <div className="animate-rise mt-5 rounded-xl border-2 border-coral/40 bg-coral/[0.05] p-5">
+      <div className="flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-coral text-[12px] text-bone">⏸</span>
+        <span className="font-display text-[15px] font-semibold text-ink">Awaiting Medical Director</span>
+        <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.14em] text-coral">human-in-the-loop</span>
+      </div>
+      <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
+        This case is borderline — the automated policy escalated it for a human decision rather than auto-denying.
+      </p>
+      {esc?.payload.message && <p className="mt-2 border-l-2 border-coral/40 pl-3 text-[13px] italic text-ink">“{esc.payload.message}”</p>}
+      {canDecide ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button variant="primary" loading={deciding} onClick={() => onDecide('APPROVE')}>Approve authorization</Button>
+          <Button variant="secondary" disabled={deciding} onClick={() => onDecide('DENY')}>Uphold denial</Button>
+        </div>
+      ) : (
+        <p className="mt-3 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-faint">awaiting the payer's Medical Director to decide</p>
+      )}
+    </div>
+  )
+}
+
 /** Copyable run id — a small audit-y affordance (click to copy the full UUID). */
 function RunIdChip({ id }: { id: string }) {
   const [copied, setCopied] = useState(false)
@@ -390,6 +433,7 @@ function Theater({ runId, orgName, onBack, onComplete }: {
 }) {
   const [detail, setDetail] = useState<RunDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [deciding, setDeciding] = useState(false)
   // Poll while the run is RUNNING so a live negotiation streams in turn by turn; stop once it
   // finishes (and refresh the caller's list). A finished run opened from the list fetches once.
   useEffect(() => {
@@ -440,7 +484,21 @@ function Theater({ runId, orgName, onBack, onComplete }: {
 
   const { run } = detail
   const live = run.status === 'running'
+  const awaiting = run.status === 'awaiting_human'
   const overturned = detail.events.some((e) => e.payload.pa_event === 'DECISION_OVERTURNED')
+
+  const decide = async (outcome: 'APPROVE' | 'DENY') => {
+    setDeciding(true)
+    try {
+      await runsApi.decide(run.id, outcome)
+      setDetail(await runsApi.get(run.id))
+      onComplete?.()
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    } finally {
+      setDeciding(false)
+    }
+  }
 
   return (
     <div>
@@ -450,7 +508,7 @@ function Theater({ runId, orgName, onBack, onComplete }: {
           <Kicker>Case · prior authorization</Kicker>
           <h1 className="mt-2 font-display text-3xl font-medium tracking-tight text-ink">{caseTitle(run.case_name)}</h1>
         </div>
-        {live ? <LivePill /> : <DecisionBadge outcome={run.outcome} state={run.final_state} />}
+        {live ? <LivePill /> : awaiting ? <AwaitingPill /> : <DecisionBadge outcome={run.outcome} state={run.final_state} />}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-faint">
         <span>{turns.length} turns</span><span>·</span>
@@ -471,6 +529,7 @@ function Theater({ runId, orgName, onBack, onComplete }: {
 
       <SlaBanner run={run} />
       {overturned && <OverturnBanner />}
+      {awaiting && <HitlPanel events={detail.events} canDecide={mySide === 'payer'} deciding={deciding} onDecide={decide} />}
 
       <Lanes mySide={mySide} myOrg={orgName} />
 
@@ -623,6 +682,96 @@ function SealedNote({ org }: { org: string }) {
   )
 }
 
+/* ─── agents / mesh ─────────────────────────────────────────────────────────
+   Showcases the multi-agent roster: who is on the mesh, the framework + model that
+   backs each role, and the protocol states they act in. Grouped by organization. */
+function AgentsView() {
+  const [agents, setAgents] = useState<AgentInfo[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    agentsApi.list().then((r) => setAgents(r.agents)).catch((e) => setError(String(e?.message || e)))
+  }, [])
+
+  const all = agents ?? []
+  const provider = all.filter((a) => a.side === 'provider')
+  const payer = all.filter((a) => a.side === 'payer')
+  const neutral = all.filter((a) => a.side === 'neutral')
+  const frameworks = new Set(all.map((a) => a.framework)).size
+
+  return (
+    <>
+      <Kicker>The mesh</Kicker>
+      <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">Agents</h1>
+      <p className="mt-3 max-w-xl text-ink-soft">Every specialist on the mesh — heterogeneous frameworks and models, one protocol — collaborating across two organizations on each case.</p>
+      {error && <Banner>{error}</Banner>}
+
+      <div className="mt-8 grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-line bg-line">
+        {agents === null ? (
+          [0, 1, 2].map((i) => (
+            <div key={i} className="bg-paper px-5 py-6"><span className="skeleton block h-8 w-12 rounded" /><span className="skeleton mt-3 block h-2.5 w-20 rounded" /></div>
+          ))
+        ) : (
+          <>
+            <Metric label="Agents" value={all.length} />
+            <Metric label="Frameworks" value={frameworks} />
+            <Metric label="Organizations" value={2} accent />
+          </>
+        )}
+      </div>
+
+      {agents === null ? (
+        <p className="mt-8 font-mono text-[12px] text-ink-faint">Loading roster…</p>
+      ) : (
+        <div className="mt-10 grid gap-x-6 gap-y-8 lg:grid-cols-2">
+          <AgentColumn title="Provider organization" side="provider" agents={provider} />
+          <AgentColumn title="Payer organization" side="payer" agents={payer} />
+          {neutral.length > 0 && <AgentColumn title="Governance" side="neutral" agents={neutral} />}
+        </div>
+      )}
+    </>
+  )
+}
+
+function AgentColumn({ title, side, agents }: { title: string; side: string; agents: AgentInfo[] }) {
+  const dot = side === 'provider' ? 'bg-pine' : side === 'payer' ? 'bg-ink' : 'bg-coral'
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2 border-b border-line pb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-ink-soft">
+        <span className={`h-2 w-2 rounded-full ${dot}`} /> {title}
+        <span className="ml-auto text-ink-faint">{agents.length} agents</span>
+      </div>
+      <div className="space-y-2.5">
+        {agents.map((a, i) => <AgentCard key={a.id} a={a} index={i} />)}
+      </div>
+    </div>
+  )
+}
+
+function AgentCard({ a, index }: { a: AgentInfo; index: number }) {
+  const accent = a.side === 'provider' ? 'bg-pine' : a.side === 'payer' ? 'bg-ink' : 'bg-coral'
+  return (
+    <div style={{ animationDelay: `${index * 50}ms` }}
+      className="animate-rise lift relative overflow-hidden rounded-xl border border-line bg-paper p-4">
+      <span className={`absolute inset-y-0 left-0 w-0.5 ${accent}`} aria-hidden />
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-display text-[15px] font-semibold">{a.name}</span>
+        {a.human
+          ? <Badge tone="coral">human · HITL</Badge>
+          : <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-pine">{a.framework.replace(/_/g, ' ')}</span>}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+        <span>{a.id}</span>
+        {a.model && <span className="text-ink-soft">{a.model}</span>}
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-1">
+        {a.acts_in.map((s) => (
+          <span key={s} className="rounded bg-sunk px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-faint">{s.toLowerCase()}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /* ─── settings ────────────────────────────────────────────────────────────── */
 function Settings({ user, org }: { user: { name: string; email: string; id: string }; org: { name: string; slug: string; plan: string } | null }) {
   return (
@@ -750,7 +899,10 @@ function YouTag() {
 }
 
 function StatusDot({ status }: { status: string }) {
-  const c = status === 'succeeded' ? 'bg-pine' : status === 'failed' ? 'bg-coral' : 'bg-ink-faint'
+  const c = status === 'succeeded' ? 'bg-pine'
+    : status === 'failed' ? 'bg-coral'
+    : status === 'awaiting_human' ? 'bg-coral'
+    : 'bg-ink-faint'
   return <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${c}`} />
 }
 

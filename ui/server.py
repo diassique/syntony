@@ -35,7 +35,7 @@ from band.client.rest import RestClient
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from control.api import current_org_id, router as auth_router, runs_router
+from control.api import current_org_id, current_user, router as auth_router, runs_router
 
 load_dotenv()
 
@@ -103,6 +103,27 @@ def state(room: str = "") -> JSONResponse:
     return JSONResponse(build_state(room or DEFAULT_ROOM))
 
 
+@app.get("/api/agents")
+def list_agents(_user=Depends(current_user)) -> JSONResponse:
+    """The agent roster (the mesh cast): each role's side, framework, model and the protocol
+    states it acts in. Static domain data — what the console's Agents view renders."""
+    from domains.authbridge.roles import ROLES
+
+    roster = [
+        {
+            "id": s.id,
+            "name": s.display_name,
+            "side": s.side.value,
+            "framework": s.framework.value,
+            "model": s.model,
+            "acts_in": [st.value for st in s.acts_in],
+            "human": s.is_human,
+        }
+        for s in ROLES.values()
+    ]
+    return JSONResponse({"agents": roster})
+
+
 # ---- live "Run a case" -----------------------------------------------------------
 # Trigger a real cross-org negotiation from the console and stream it into the org's audit
 # trail. This lives in the composition root (it wires the domain + Band + control plane),
@@ -149,6 +170,30 @@ async def start_live_run(
 
     asyncio.create_task(_go())
     return JSONResponse({"run_id": run_id, "case_name": case_name, "status": "running"}, status_code=202)
+
+
+class DecisionIn(BaseModel):
+    outcome: str  # "APPROVE" | "DENY"
+
+
+@app.post("/api/runs/{run_id}/decide")
+async def decide_run(run_id: str, body: DecisionIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    """Human-in-the-loop: the payer-side Medical Director approves or denies a borderline case
+    that paused for review, and the negotiation completes with that verdict."""
+    from control import seed
+    from control.db import session as open_session
+    import live_run
+
+    with open_session() as sess:
+        payer_org = seed.demo_side_orgs(sess).get("payer")
+    if not payer_org or org_id != payer_org:
+        raise HTTPException(403, "only the payer's Medical Director can decide this case")
+
+    try:
+        outcome = await asyncio.to_thread(live_run.apply_human_decision, run_id, body.outcome)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return JSONResponse({"run_id": run_id, "outcome": outcome, "status": "succeeded"})
 
 
 @app.websocket("/ws")

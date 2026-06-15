@@ -88,6 +88,14 @@ class AuthBridgeState:
     pending_docs: tuple[str, ...] = ()
     info_satisfied: bool = False
     appealed: bool = False  # set once Provider Appeals has cured a denial and resubmitted
+    # multi-agent pipeline progress (each gates a real specialist turn; see plan())
+    eligibility_checked: bool = False  # provider Eligibility & Benefits ran (pre-submit)
+    submitted: bool = False            # provider Counsel has submitted the request to the payer
+    guidelines_done: bool = False      # payer Clinical Guidelines consulted
+    compliance_done: bool = False      # payer Compliance & Audit consulted
+    pharmacy_done: bool = False        # payer Pharmacy & Formulary consulted (drug cases)
+    notified: bool = False             # Member Notification drafted before a terminal decision
+    pending_consult: str | None = None  # which specialist the Reviewer is currently consulting
 
 
 @dataclass(frozen=True)
@@ -129,38 +137,99 @@ def _missing_docs(req: PriorAuthRequest) -> list[str]:
     return [d for d in rule.required_docs if d not in req.supporting_docs]
 
 
+def _is_drug(req: PriorAuthRequest) -> bool:
+    """Drug requests (HCPCS J-codes) get a pharmacy/formulary consult."""
+    return req.procedure.system.upper() == "HCPCS"
+
+
 def plan(state: State, st: AuthBridgeState) -> _Plan | None:
-    """Decide the next move purely from policy + the working request. No LLM, no I/O."""
+    """Decide the next move purely from policy + the working request. No LLM, no I/O.
+
+    The pipeline weaves specialist agents onto the generic L1 states (no new states):
+    Intake → Eligibility (pre-submit) → Counsel submits → the Reviewer consults Clinical
+    Guidelines, Compliance, and (for drugs) Pharmacy via RECRUIT round-trips → Member
+    Notification drafts the notice → the terminal DECISION. Borderline cases escalate to
+    the human Medical Director instead of an auto-deny.
+    """
     if state is State.FRAME:
         return _Plan(
-            "provider.intake",
-            Kind.CASE_OPEN,
-            State.PROPOSE,
+            "provider.intake", Kind.CASE_OPEN, State.PROPOSE,
             f"Opening a prior-authorization case for {st.req.procedure.display} "
             f"(patient {st.req.patient_ref}).",
-            mentions=("provider.counsel",),
-            pa_event="PA_INITIATED",
+            mentions=("provider.eligibility",), pa_event="PA_INITIATED",
         )
 
     if state is State.PROPOSE:
-        issues = completeness_issues(st.req)
-        if issues:
-            fixes = _fix_request(st.req)
-            facts = (
-                "Pre-submit completeness check found: " + "; ".join(issues) + ". "
-                "Corrected before submission: " + "; ".join(fixes) + "."
+        # Provider Eligibility & Benefits verifies coverage before anything goes to the payer.
+        if not st.eligibility_checked:
+            st.eligibility_checked = True
+            return _Plan(
+                "provider.eligibility", Kind.INFO_RESPONSE, State.INFO,
+                "Verified active coverage and that the service is a covered benefit requiring prior "
+                "authorization — no eligibility blocks.",
+                mentions=("provider.counsel",), pa_event="ELIGIBILITY_VERIFIED",
             )
-        else:
-            facts = "Pre-submit completeness check passed; submitting the request to the payer."
-        return _Plan("provider.counsel", Kind.PROPOSAL, State.REVIEW, facts,
-                     mentions=("payer.reviewer",), pa_event="REQUEST_SUBMITTED")
+        return None  # PROPOSE is transient; Counsel submits from INFO
+
+    if state is State.INFO:
+        # First pass: Counsel runs the completeness check and submits.
+        if not st.submitted:
+            issues = completeness_issues(st.req)
+            if issues:
+                fixes = _fix_request(st.req)
+                facts = ("Pre-submit completeness check found: " + "; ".join(issues) +
+                         ". Corrected before submission: " + "; ".join(fixes) + ".")
+            else:
+                facts = "Pre-submit completeness check passed; submitting the request to the payer."
+            st.submitted = True
+            return _Plan("provider.counsel", Kind.PROPOSAL, State.REVIEW, facts,
+                         mentions=("payer.reviewer",), pa_event="REQUEST_SUBMITTED")
+        # Later passes: Counsel answers a payer information request.
+        if st.pending_docs and not st.info_satisfied:
+            st.req.supporting_docs = list(st.req.supporting_docs) + [
+                d for d in st.pending_docs if d not in st.req.supporting_docs
+            ]
+            st.info_satisfied = True
+            return _Plan(
+                "provider.counsel", Kind.INFO_RESPONSE, State.REVIEW,
+                "Supplied the requested documentation: " + ", ".join(st.pending_docs) + ".",
+                mentions=("payer.reviewer",), pa_event="DOCUMENTATION_COLLECTED",
+            )
+        return _Plan(
+            "provider.counsel", Kind.INFO_RESPONSE, State.REVIEW,
+            "No additional documentation is available for this request.",
+            mentions=("payer.reviewer",), pa_event="DOCUMENTATION_COLLECTED",
+        )
 
     if state is State.REVIEW:
+        # The Reviewer consults its specialists (each a RECRUIT round-trip) before deciding.
+        if not st.guidelines_done:
+            st.pending_consult = "guidelines"
+            return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
+                         "Consulting Clinical Guidelines on medical necessity.",
+                         mentions=("payer.guidelines",), pa_event="CONSULT_GUIDELINES")
+        if not st.compliance_done:
+            st.pending_consult = "compliance"
+            return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
+                         "Routing to Compliance & Audit for HIPAA and specific-reason review.",
+                         mentions=("payer.compliance",), pa_event="CONSULT_COMPLIANCE")
+        if _is_drug(st.req) and not st.pharmacy_done:
+            st.pending_consult = "pharmacy"
+            return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
+                         "Consulting Pharmacy & Formulary on the drug policy.",
+                         mentions=("payer.pharmacy",), pa_event="CONSULT_PHARMACY")
+
         d = necessity_decision(st.req)
         st.decision = d
         reasons = "; ".join(d.reasons)
         reason_code = d.reason_code.value if d.reason_code else None
+
         if d.outcome is Outcome.APPROVE:
+            if not st.notified:
+                st.pending_consult = "notify"
+                return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
+                             "Approval reached — preparing the determination notice.",
+                             mentions=("payer.notification",), pa_event="CONSULT_NOTIFY")
             overturned = st.appealed
             verb = "APPROVE on reconsideration (overturned)" if overturned else "APPROVE"
             return _Plan(
@@ -194,12 +263,47 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
                 pa_event="DECISION_DENIED", denial_reason=reason_code,
                 payload_extra={"outcome": "DENY", "appealable": True},
             )
+        # Terminal denial → notify before recording the binding decision.
+        if not st.notified:
+            st.pending_consult = "notify"
+            return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
+                         "Denial determined — preparing the determination notice and appeal rights.",
+                         mentions=("payer.notification",), pa_event="CONSULT_NOTIFY")
         return _Plan(
             "payer.reviewer", Kind.DECISION, State.DECIDE,
             f"DENY — {reasons}", mentions=("provider.counsel",),
             pa_event="DECISION_DENIED", denial_reason=reason_code,
             payload_extra={"outcome": "DENY"},
         )
+
+    if state is State.RECRUIT:
+        c = st.pending_consult
+        st.pending_consult = None
+        if c == "guidelines":
+            st.guidelines_done = True
+            return _Plan("payer.guidelines", Kind.PROPOSAL, State.REVIEW,
+                         "Applied evidence-based criteria (MCG/InterQual-style); reported which "
+                         "medical-necessity criteria are met for the requested service.",
+                         mentions=("payer.reviewer",), pa_event="GUIDELINES_APPLIED")
+        if c == "compliance":
+            st.compliance_done = True
+            return _Plan("payer.compliance", Kind.INFO_RESPONSE, State.REVIEW,
+                         "Compliance check passed: minimum-necessary PHI, and any adverse "
+                         "determination will carry a specific reason per CMS-0057-F.",
+                         mentions=("payer.reviewer",), pa_event="COMPLIANCE_VERIFIED")
+        if c == "pharmacy":
+            st.pharmacy_done = True
+            return _Plan("payer.pharmacy", Kind.PROPOSAL, State.REVIEW,
+                         "Pharmacy review: checked formulary tier and step-therapy requirements "
+                         "for the requested agent.",
+                         mentions=("payer.reviewer",), pa_event="FORMULARY_CHECKED")
+        if c == "notify":
+            st.notified = True
+            return _Plan("payer.notification", Kind.INFO_RESPONSE, State.REVIEW,
+                         "Drafted the determination notice (member + provider copy) with the "
+                         "decision rationale and, on a denial, the appeal rights and deadline.",
+                         mentions=("payer.reviewer",), pa_event="NOTICE_DRAFTED")
+        return None
 
     if state is State.REVISE:
         # Provider Appeals cures the specific denial reason and resubmits for reconsideration.
@@ -217,23 +321,6 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
         return _Plan(
             "provider.appeals", Kind.PROPOSAL, State.REVIEW, facts,
             mentions=("payer.reviewer",), pa_event="APPEAL_PACKET_ASSEMBLED",
-        )
-
-    if state is State.INFO:
-        if st.pending_docs and not st.info_satisfied:
-            st.req.supporting_docs = list(st.req.supporting_docs) + [
-                d for d in st.pending_docs if d not in st.req.supporting_docs
-            ]
-            st.info_satisfied = True
-            return _Plan(
-                "provider.counsel", Kind.INFO_RESPONSE, State.REVIEW,
-                "Supplied the requested documentation: " + ", ".join(st.pending_docs) + ".",
-                mentions=("payer.reviewer",), pa_event="DOCUMENTATION_COLLECTED",
-            )
-        return _Plan(
-            "provider.counsel", Kind.INFO_RESPONSE, State.REVIEW,
-            "No additional documentation is available for this request.",
-            mentions=("payer.reviewer",), pa_event="DOCUMENTATION_COLLECTED",
         )
 
     if state is State.ESCALATE:
@@ -389,6 +476,7 @@ async def run_authbridge(
     case_id: str | None = None,
     max_turns: int = 24,
     on_turn: Callable[..., Any] | None = None,
+    pause_states: Any = None,
 ):
     """Run one synthetic AuthBridge case end-to-end through the coordinator.
 
@@ -414,4 +502,5 @@ async def run_authbridge(
         domain=st,
         max_turns=max_turns,
         on_turn=on_turn,
+        pause_states=pause_states,
     )

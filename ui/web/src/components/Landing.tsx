@@ -30,10 +30,15 @@ const PATH = [
 
 const AGENTS = [
   { ch: 'CH1', role: 'Intake', side: 'provider', fw: 'LangGraph', fn: 'frames a FHIR-shaped request from the chart' },
-  { ch: 'CH2', role: 'Counsel', side: 'provider', fw: 'Pydantic AI', fn: 'fixes the codes, signatures & docs that cause denials' },
-  { ch: 'CH3', role: 'Reviewer', side: 'payer', fw: 'Pydantic AI', fn: 'checks medical-necessity policy; asks only for gaps' },
-  { ch: 'CH4', role: 'Medical Director', side: 'payer', fw: 'Human-in-the-loop', fn: 'adjudicates borderline cases an algorithm should not' },
-  { ch: 'CH5', role: 'Provider Appeals', side: 'provider', fw: 'Letta · Featherless', fn: 'cures the cited denial reason and resubmits' },
+  { ch: 'CH2', role: 'Eligibility & Benefits', side: 'provider', fw: 'Pydantic AI', fn: 'verifies coverage before anything goes out' },
+  { ch: 'CH3', role: 'Counsel', side: 'provider', fw: 'Pydantic AI', fn: 'fixes the codes, signatures & docs that cause denials' },
+  { ch: 'CH4', role: 'Provider Appeals', side: 'provider', fw: 'Letta · Featherless', fn: 'cures the cited denial reason and resubmits' },
+  { ch: 'CH5', role: 'Reviewer', side: 'payer', fw: 'Pydantic AI', fn: 'checks medical-necessity policy; asks only for gaps' },
+  { ch: 'CH6', role: 'Clinical Guidelines', side: 'payer', fw: 'Pydantic AI', fn: 'applies MCG/InterQual-style criteria, cites them' },
+  { ch: 'CH7', role: 'Pharmacy & Formulary', side: 'payer', fw: 'LangGraph', fn: 'checks formulary tier & step-therapy for drugs' },
+  { ch: 'CH8', role: 'Compliance & Audit', side: 'payer', fw: 'CrewAI', fn: 'enforces minimum-necessary PHI & specific-reason' },
+  { ch: 'CH9', role: 'Member Notification', side: 'payer', fw: 'LangGraph', fn: 'drafts the determination notice & appeal rights' },
+  { ch: 'CH10', role: 'Medical Director', side: 'payer', fw: 'Human-in-the-loop', fn: 'adjudicates borderline cases an algorithm should not' },
 ]
 
 const LAYERS = [
@@ -466,7 +471,7 @@ export default function Landing() {
       {/* §03 — channels (the cast) */}
       <section id="agents" className="mx-auto max-w-6xl px-6 py-20 lg:py-28">
         <Index n="§03" label="channels" />
-        <h2 data-reveal className="mt-5 max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-[2.6rem]">Five specialist agents. Two organizations. One protocol.</h2>
+        <h2 data-reveal className="mt-5 max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-[2.6rem]">Ten specialist agents. Two organizations. One protocol.</h2>
         <p data-reveal className="mt-4 max-w-xl text-ink-soft">Each channel runs the framework that fits its job — heterogeneous by design, interoperable by contract. The mesh doesn't care who built whom.</p>
 
         <div data-reveal className="mt-12">
@@ -574,7 +579,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-            built on the <span className="text-ink">Band</span> agentic mesh · ≥ 5 agents · 2 real organizations
+            built on the <span className="text-ink">Band</span> agentic mesh · 10 specialist agents · 2 real organizations
           </p>
         </div>
       </section>

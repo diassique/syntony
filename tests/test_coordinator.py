@@ -130,6 +130,22 @@ def test_tools_for_routes_each_envelope_to_its_account():
     payer.assert_message_sent(count=1)   # the payer move
 
 
+def test_pause_states_stop_the_loop_for_human_in_the_loop():
+    """A move that lands the case in a pause state stops the loop (stopped='paused'), emitting
+    that move but not advancing further — the basis for the human-in-the-loop decision."""
+    runner = _scripted([
+        (State.PROPOSE, Kind.CASE_OPEN, Visibility.ROOM, ()),
+        (State.REVIEW, Kind.PROPOSAL, Visibility.ROOM, ()),
+        (State.ESCALATE, Kind.ESCALATION, Visibility.ROOM, ()),
+        (State.ARBITER, Kind.RECRUIT_REQUEST, Visibility.ROOM, ()),  # entering ARBITER pauses
+        (State.DECIDE, Kind.DECISION, Visibility.ROOM, ()),          # never reached
+    ])
+    res = asyncio.run(run_case(case_id="c1", start=State.FRAME, runner=runner, pause_states={State.ARBITER}))
+    assert res.stopped == "paused"
+    assert res.final_state is State.ARBITER
+    assert [e.kind for e in res.history][-1] is Kind.RECRUIT_REQUEST  # the pausing move was emitted
+
+
 def test_on_turn_fires_once_per_turn_with_envelope_and_new_state():
     """The streaming hook lets a caller persist/observe each turn as it lands (live theater)."""
     seen: list[tuple[Kind, State]] = []
