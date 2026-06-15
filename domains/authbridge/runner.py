@@ -406,10 +406,11 @@ def _parse_turn(text: str, *, fallback: str) -> dict:
             continue
         msg = _find_str(obj, "message")
         if msg:
-            msg = re.sub(r"^@[\w.]+:\s*", "", msg)  # drop a leading "@role:" addressing prefix
-            return {"message": msg, "reasoning": _find_str(obj, "reasoning") or fallback}
-    # No usable JSON object: keep short plain prose, else use the clean facts (not a blob).
-    plain = s if (s and "{" not in s and len(s) <= 400) else fallback
+            msg = re.sub(r"^@[\w.]+:\s*", "", msg).strip()  # drop a leading "@role:" prefix
+            if msg and not msg.startswith(("{", "[")):  # a message that is itself JSON → unusable
+                return {"message": msg, "reasoning": _find_str(obj, "reasoning") or fallback}
+    # No usable message: keep short plain prose, else use the clean facts (never a blob).
+    plain = s if (s and not s.lstrip().startswith(("{", "[")) and len(s) <= 400) else fallback
     return {"message": plain, "reasoning": fallback}
 
 

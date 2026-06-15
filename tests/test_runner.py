@@ -139,6 +139,8 @@ def test_parse_turn_unwraps_verbose_replies_and_falls_back_cleanly():
     assert _parse_turn(nested, fallback="F")["message"] == "Approved."
     # an un-parseable blob never leaks — fall back to the clean facts
     assert _parse_turn('{"weird": [1,2,', fallback="CLEAN FACTS")["message"] == "CLEAN FACTS"
+    # a message field that is itself a JSON blob → not usable, fall back to facts
+    assert _parse_turn('{"message":"{\\"kind\\":\\"CASE_OPEN\\"}"}', fallback="CLEAN")["message"] == "CLEAN"
 
 
 def test_guidelines_cites_the_retrieved_criterion():
