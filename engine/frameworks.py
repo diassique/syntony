@@ -1,15 +1,17 @@
 """L2 — real agent-framework execution for a role's turn.
 
-The heterogeneity is genuine: a role's reasoning is produced by an actual framework, with the
-model served through the AI/ML gateway (one key — the partner prize stays intact):
+The heterogeneity is genuine: a role's reasoning is produced by an actual framework, configured
+from the SAME ``LLMConfig`` the gateway path uses (one source of truth) — model, ``base_url``,
+key env and temperature flow through. (``reasoning_effort`` is intentionally left to the gateway
+path: enabling Anthropic "thinking" conflicts with the frameworks' forced structured output.)
 
 - **Pydantic AI** — a typed ``Agent`` (``output_type``) for the typed/reasoning roles.
 - **LangGraph** — a one-node ``StateGraph`` for the stateful/pipeline roles.
 
-Both return a structured ``{message, reasoning}``. The exact installed APIs were verified live
-(``spikes/08``). Imports are lazy so this module stays import-safe without the extras, and each
-call is **best-effort**: the caller (``runner.llm_narrator``) falls back to the gateway or the
-deterministic facts on any failure, so a framework hiccup never breaks a negotiation.
+Both return a structured ``{message, reasoning}``. Imports are lazy so the module stays
+import-safe without the extras, and each call is **best-effort**: the caller
+(``runner.llm_narrator``) falls back to the gateway or deterministic facts on any failure.
+APIs verified live (``spikes/08``).
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from engine.llm import AIML_BASE_URL
+from engine.llm import LLMConfig
 
 
 class _Turn(BaseModel):
@@ -28,10 +30,10 @@ class _Turn(BaseModel):
     reasoning: str
 
 
-def _key() -> str:
-    key = os.environ.get("AIML_API_KEY")
+def _key(cfg: LLMConfig) -> str:
+    key = os.environ.get(cfg.api_key_env)
     if not key:
-        raise RuntimeError("AIML_API_KEY not set — needed for framework execution")
+        raise RuntimeError(f"{cfg.api_key_env} not set — needed for framework execution")
     return key
 
 
@@ -40,24 +42,27 @@ def _clean(msg: str) -> str:
     return re.sub(r"^@[\w.]+:\s*", "", msg.strip())
 
 
-def pydantic_ai_turn(*, model: str, system_prompt: str, user: str, max_tokens: int = 400) -> dict[str, Any]:
-    """Produce a turn via a real Pydantic AI Agent (model served at the AI/ML base_url)."""
+def pydantic_ai_turn(*, cfg: LLMConfig, system_prompt: str, user: str, max_tokens: int = 400) -> dict[str, Any]:
+    """Produce a turn via a real Pydantic AI Agent, configured from ``cfg`` (AI/ML provider)."""
     from pydantic_ai import Agent
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider
 
-    chat = OpenAIChatModel(model, provider=OpenAIProvider(base_url=AIML_BASE_URL, api_key=_key()))
-    agent = Agent(chat, output_type=_Turn, system_prompt=system_prompt,
-                  model_settings={"max_tokens": max_tokens})
+    chat = OpenAIChatModel(cfg.model, provider=OpenAIProvider(base_url=cfg.base_url, api_key=_key(cfg)))
+    settings: dict[str, Any] = {"max_tokens": max_tokens}
+    if cfg.temperature is not None:
+        settings["temperature"] = cfg.temperature
+    # NB: reasoning_effort is deliberately NOT set here — it enables Anthropic "thinking", which the
+    # provider rejects together with the forced tool-call structured output (output_type). Deep
+    # reasoning isn't needed to phrase already-decided facts; reasoning_effort lives on the gateway path.
+    agent = Agent(chat, output_type=_Turn, system_prompt=system_prompt, model_settings=settings)
     out = agent.run_sync(user).output
     return {"message": _clean(out.message), "reasoning": out.reasoning}
 
 
-def langgraph_turn(*, model: str, system_prompt: str, user: str, max_tokens: int = 400) -> dict[str, Any]:
-    """Produce a turn via a real LangGraph StateGraph (ChatOpenAI bound to the AI/ML base_url).
-
-    Parses the reply defensively (not ``with_structured_output``) so it's reliable across models
-    including the cheap Haiku tier — the graph genuinely executes; only the parse is forgiving."""
+def langgraph_turn(*, cfg: LLMConfig, system_prompt: str, user: str, max_tokens: int = 400) -> dict[str, Any]:
+    """Produce a turn via a real LangGraph StateGraph (ChatOpenAI from ``cfg``). Parses defensively
+    so it's reliable across models incl. the cheap tier — the graph genuinely executes."""
     from typing import TypedDict
 
     from langchain_openai import ChatOpenAI
@@ -65,7 +70,11 @@ def langgraph_turn(*, model: str, system_prompt: str, user: str, max_tokens: int
 
     from engine.llm import loads_json
 
-    llm = ChatOpenAI(model=model, base_url=AIML_BASE_URL, api_key=_key(), temperature=0, max_tokens=max_tokens)
+    kw: dict[str, Any] = {"model": cfg.model, "base_url": cfg.base_url, "api_key": _key(cfg), "max_tokens": max_tokens}
+    if cfg.temperature is not None:
+        kw["temperature"] = cfg.temperature
+    # reasoning_effort omitted (see pydantic_ai_turn) — it stays on the gateway path.
+    llm = ChatOpenAI(**kw)
     instruction = (user + '\n\nReturn ONLY a JSON object with two string fields: "message" '
                    '(1–2 sentences, no PHI) and "reasoning" (one sentence).')
 

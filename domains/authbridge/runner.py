@@ -447,7 +447,7 @@ def llm_narrator(*, debug: bool = True) -> Narrator:
         fw = turn_fn(spec.framework.value)
         if fw is not None:
             try:
-                out = fw(model=cfg.model, system_prompt=spec.system_prompt, user=user)
+                out = fw(cfg=cfg, system_prompt=spec.system_prompt, user=user)
                 # A weak model can still bury/blob the message; run it through the same cleaner.
                 msg = _parse_turn(out.get("message", ""), fallback="")["message"]
                 if msg and not msg.startswith(("{", "[")):
