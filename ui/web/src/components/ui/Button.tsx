@@ -5,6 +5,7 @@
  *  Supports `loading` (shows a spinner + disables) and leading/trailing icons.
  *  Forwards its ref and spreads native <button> props, so it drops in anywhere. */
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { Loader2 } from 'lucide-react'
 import { cx } from './cx'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'signal'
@@ -52,18 +53,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       )}
       {...rest}
     >
-      {loading ? <ButtonSpinner /> : leadingIcon}
+      {loading ? <Loader2 size={15} className="animate-spin" aria-hidden /> : leadingIcon}
       {children}
       {!loading && trailingIcon}
     </button>
   )
 })
-
-function ButtonSpinner() {
-  return (
-    <svg viewBox="0 0 24 24" width="14" height="14" className="animate-spin" aria-hidden>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4" fill="none" opacity="0.25" />
-      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.4" fill="none" strokeLinecap="round" />
-    </svg>
-  )
-}

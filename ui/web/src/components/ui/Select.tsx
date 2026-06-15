@@ -4,6 +4,7 @@
  *  Esc/Tab close. Closes on outside-click. ARIA: combobox trigger + listbox/option, with
  *  aria-activedescendant tracking the highlighted row. */
 import { useEffect, useId, useRef, useState } from 'react'
+import { Check, ChevronDown } from 'lucide-react'
 import { cx } from './cx'
 
 export interface SelectOption {
@@ -120,10 +121,8 @@ export function Select({
         )}
       >
         <span className={cx('truncate', !selected && 'text-ink-faint')}>{selected ? selected.label : placeholder}</span>
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden
-          className={cx('shrink-0 text-ink-faint transition-transform duration-200', open && 'rotate-180')}>
-          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <ChevronDown size={14} strokeWidth={1.75} aria-hidden
+          className={cx('shrink-0 text-ink-faint transition-transform duration-200', open && 'rotate-180')} />
       </button>
 
       {open && (
@@ -158,11 +157,7 @@ export function Select({
                 )}
               >
                 <span className="truncate">{o.label}</span>
-                {isSelected && (
-                  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden className="shrink-0 text-pine">
-                    <path d="M3.5 8.5l3 3 6-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
+                {isSelected && <Check size={14} strokeWidth={2} aria-hidden className="shrink-0 text-pine" />}
               </li>
             )
           })}

@@ -7,6 +7,11 @@
  * asymmetry — visible at a glance — is the cross-org privacy moat. */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  LayoutDashboard, FolderClosed, Boxes, BarChart3, Settings as SettingsIcon,
+  Play, Upload, Copy, Check, ExternalLink, FileText, Braces,
+  Lock, Clock, RotateCcw, Gavel, ChevronRight, Loader2,
+} from 'lucide-react'
 import { runsApi, agentsApi, type AgentInfo, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
 import { Wordmark } from './Logo'
@@ -105,20 +110,11 @@ function RunCaseButton({ onRunCase, starting, subtle }: { onRunCase: (caseName?:
         onValueChange={setScenario}
         options={SCENARIOS.map((s) => ({ label: s.label, value: s.id }))} />
       <Button variant={subtle ? 'secondary' : 'signal'} size="md" loading={starting}
-        leadingIcon={<span aria-hidden className="text-[15px] leading-none">▶</span>}
+        leadingIcon={<Play size={14} className="fill-current" strokeWidth={0} aria-hidden />}
         onClick={() => onRunCase(scenario)}>
         {starting ? 'Starting a live case…' : 'Run a live case'}
       </Button>
     </div>
-  )
-}
-
-function Spinner() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" className="animate-spin" aria-hidden>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4" fill="none" opacity="0.25" />
-      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.4" fill="none" strokeLinecap="round" />
-    </svg>
   )
 }
 
@@ -137,7 +133,7 @@ function IntakeButton({ onIntake, starting }: { onIntake: (p: { image?: string; 
     <div className="inline-flex items-center gap-2">
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
       <Button variant="secondary" disabled={starting} onClick={() => fileRef.current?.click()}
-        leadingIcon={<span aria-hidden className="text-[14px] leading-none">↥</span>}>
+        leadingIcon={<Upload size={14} strokeWidth={1.75} aria-hidden />}>
         Intake from document
       </Button>
       <button onClick={() => onIntake({ sample: true })} disabled={starting}
@@ -156,12 +152,12 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
   onNav: (v: View) => void
   onSignOut: () => void
 }) {
-  const items: { id: View; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'cases', label: 'Cases' },
-    { id: 'agents', label: 'Agents' },
-    { id: 'insights', label: 'Insights' },
-    { id: 'settings', label: 'Settings' },
+  const items: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'cases', label: 'Cases', icon: FolderClosed },
+    { id: 'agents', label: 'Agents', icon: Boxes },
+    { id: 'insights', label: 'Insights', icon: BarChart3 },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ]
   return (
     <aside className="border-b border-line bg-paper/70 backdrop-blur md:sticky md:top-0 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:border-b-0 md:border-r">
@@ -192,9 +188,10 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
       <nav className="flex gap-1 px-3 md:flex-col">
         {items.map((it) => (
           <button key={it.id} onClick={() => onNav(it.id)}
-            className={`flex-1 rounded-lg px-3 py-2 text-left font-mono text-[12px] uppercase tracking-[0.1em] transition-colors md:flex-none ${
+            className={`flex flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-left font-mono text-[12px] uppercase tracking-[0.1em] transition-colors md:flex-none ${
               view === it.id ? 'bg-pine/10 text-pine' : 'text-ink-soft hover:bg-sunk/60 hover:text-ink'
             }`}>
+            <it.icon size={15} strokeWidth={1.75} className="shrink-0" />
             {it.label}
           </button>
         ))}
@@ -400,7 +397,7 @@ function CaseList({ runs, onOpen, onRunCase, starting }: {
               {running ? <LivePill /> : r.status === 'awaiting_human' ? <AwaitingPill /> : <OutcomeBadge outcome={r.outcome} />}
               <span className="hidden font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint sm:inline">{r.events} msgs</span>
               {r.private_events > 0 && <LockChip n={r.private_events} />}
-              <span className="font-mono text-ink-faint transition-transform group-hover:translate-x-0.5">→</span>
+              <ChevronRight size={15} className="shrink-0 text-ink-faint transition-transform group-hover:translate-x-0.5" />
             </div>
           </button>
         )
@@ -412,7 +409,7 @@ function CaseList({ runs, onOpen, onRunCase, starting }: {
 function ExpeditedChip() {
   return (
     <span className="flex items-center gap-1 rounded-md border border-coral/40 bg-coral/[0.06] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-coral">
-      <ClockGlyph /> 72h
+      <Clock size={11} strokeWidth={2} /> 72h
     </span>
   )
 }
@@ -449,7 +446,7 @@ function HitlPanel({ events, canDecide, deciding, onDecide }: {
   return (
     <div className="animate-rise mt-5 rounded-xl border-2 border-coral/40 bg-coral/[0.05] p-5">
       <div className="flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-coral text-[12px] text-bone">⏸</span>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-coral text-bone"><Gavel size={13} /></span>
         <span className="font-display text-[15px] font-semibold text-ink">Awaiting Medical Director</span>
         <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.14em] text-coral">human-in-the-loop</span>
       </div>
@@ -478,7 +475,8 @@ function RunIdChip({ id }: { id: string }) {
   return (
     <button onClick={copy} title="Copy run id"
       className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint transition-colors hover:border-pine/40 hover:text-ink">
-      run {id.slice(0, 8)} <span className={copied ? 'text-pine' : 'text-ink-faint'}>{copied ? '✓ copied' : '⧉'}</span>
+      run {id.slice(0, 8)}
+      {copied ? <Check size={12} className="text-pine" /> : <Copy size={12} />}
     </button>
   )
 }
@@ -593,16 +591,16 @@ function Theater({ runId, orgName, onBack, onComplete }: {
         {run.room_id && (
           <a href={`/?room=${run.room_id}#/live`} target="_blank" rel="noreferrer"
             className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine">
-            <span className="h-1.5 w-1.5 rounded-full bg-coral" /> view Band room ↗
+            <ExternalLink size={12} /> view Band room
           </a>
         )}
         <button onClick={exportPdf} disabled={exporting} title="Download audit PDF"
           className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine disabled:opacity-60">
-          {exporting ? 'exporting…' : '↓ PDF'}
+          {exporting ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />} {exporting ? 'exporting…' : 'PDF'}
         </button>
         <button onClick={exportJson} title="Download audit JSON"
           className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine">
-          ↓ JSON
+          <Braces size={12} /> JSON
         </button>
       </div>
 
@@ -614,7 +612,7 @@ function Theater({ runId, orgName, onBack, onComplete }: {
 
       {live && turns.length === 0 && (
         <p className="mt-4 flex items-center gap-2 font-mono text-[12px] text-ink-faint">
-          <Spinner /> Negotiating across the mesh — turns will appear as they're posted…
+          <Loader2 size={13} className="animate-spin" /> Negotiating across the mesh — turns will appear as they're posted…
         </p>
       )}
 
@@ -627,7 +625,7 @@ function Theater({ runId, orgName, onBack, onComplete }: {
       </ol>
 
       <p className="mt-6 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-        <LockGlyph className="text-coral" /> private reasoning is scoped to its own organization — never the other side
+        <Lock size={11} strokeWidth={1.75} className="text-coral" /> private reasoning is scoped to its own organization — never the other side
       </p>
     </div>
   )
@@ -638,7 +636,7 @@ function OverturnBanner() {
   return (
     <div className="animate-rise mt-4 overflow-hidden rounded-xl border border-pine/30 bg-pine/[0.05] p-4">
       <div className="flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-pine text-bone">↺</span>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-pine text-bone"><RotateCcw size={13} /></span>
         <span className="font-display text-[15px] font-semibold text-pine">Denial overturned on appeal</span>
       </div>
       <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
@@ -661,7 +659,7 @@ function SlaBanner({ run }: { run: RunSummary }) {
   return (
     <div className={`mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-4 py-2.5 ${
       expedited ? 'border-coral/30 bg-coral/[0.04]' : 'border-line bg-sunk/40'}`}>
-      <ClockGlyph className={expedited ? 'text-coral' : 'text-ink-soft'} />
+      <Clock size={13} strokeWidth={1.75} className={expedited ? 'text-coral' : 'text-ink-soft'} />
       <span className="font-display text-[13px] font-semibold">{expedited ? 'Expedited' : 'Standard'}</span>
       <span className="text-[13px] text-ink-soft">decision due within {expedited ? '72 hours' : '7 calendar days'}</span>
       <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">CMS-0057-F</span>
@@ -672,15 +670,6 @@ function SlaBanner({ run }: { run: RunSummary }) {
         </span>
       )}
     </div>
-  )
-}
-
-function ClockGlyph({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" className={className} aria-hidden>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
   )
 }
 
@@ -741,7 +730,7 @@ function PrivateNote({ text, org }: { text: string; org: string }) {
   return (
     <div className="rounded-xl border border-coral/35 bg-coral/[0.05] px-4 py-2.5">
       <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-coral">
-        <LockGlyph /> private · only {org} sees this
+        <Lock size={11} strokeWidth={1.75} /> private · only {org} sees this
       </div>
       <p className="mt-1 text-[13px] italic leading-relaxed text-ink-soft">{text || '—'}</p>
     </div>
@@ -752,7 +741,7 @@ function SealedNote({ org }: { org: string }) {
   return (
     <div className="rounded-xl border border-dashed border-line bg-sunk/40 px-4 py-2.5">
       <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">
-        <LockGlyph /> private reasoning · sealed to {org}
+        <Lock size={11} strokeWidth={1.75} /> private reasoning · sealed to {org}
       </div>
       <div className="mt-1.5 flex gap-1 opacity-60" aria-hidden>
         {[40, 64, 28, 52].map((w, i) => <span key={i} style={{ width: w }} className="h-2 rounded-full bg-ink-faint/30" />)}
@@ -1089,18 +1078,8 @@ function DecisionBadge({ outcome, state }: { outcome: string | null; state: stri
 function LockChip({ n }: { n: number }) {
   return (
     <span className="flex items-center gap-1 rounded-md border border-coral/40 bg-coral/5 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-coral">
-      <LockGlyph /> {n}
+      <Lock size={11} strokeWidth={1.75} /> {n}
     </span>
-  )
-}
-
-function LockGlyph({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" className={className} aria-hidden>
-      <rect x="5" y="11" width="14" height="9" rx="2" fill="currentColor" opacity="0.18" />
-      <rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M8 11V8a4 4 0 1 1 8 0v3" stroke="currentColor" strokeWidth="1.6" />
-    </svg>
   )
 }
 
