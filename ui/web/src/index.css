@@ -71,8 +71,67 @@ body {
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .animate-rise { animation: rise 0.35s ease-out both; }
 
+/* faint clinical grid texture for feature bands (masked to fade at the edges) */
+.grid-paper {
+  background-image:
+    linear-gradient(var(--color-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+  background-size: 30px 30px;
+  -webkit-mask-image: radial-gradient(ellipse 75% 60% at 50% 45%, #000 25%, transparent 78%);
+  mask-image: radial-gradient(ellipse 75% 60% at 50% 45%, #000 25%, transparent 78%);
+}
+
+/* subtle hover lift for cards */
+.lift { transition: transform .28s cubic-bezier(.2,.7,.2,1), box-shadow .28s, border-color .28s; }
+.lift:hover { transform: translateY(-3px); box-shadow: 0 24px 50px -32px rgba(14,19,17,0.45); }
+
+/* skeleton shimmer for loading states */
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; background: var(--color-sunk); }
+.skeleton::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent);
+  animation: shimmer 1.5s infinite;
+}
+
+/* a faint sweep that traces a connector line once it reveals */
+@keyframes flow { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+.flowline {
+  background-image: linear-gradient(90deg, var(--color-line) 0 40%, var(--color-pine) 50%, var(--color-line) 60% 100%);
+  background-size: 200% 100%;
+  animation: flow 4.2s linear infinite;
+}
+
+/* faint instrument grid texture (used as a hairline divider in the footer) */
+.scope-grid {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--color-ink) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-ink) 8%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ── Agent theater (hero + privacy): agents working a case in plain sight ── */
+/* a message packet travelling between the two agents */
+@keyframes packet-r { 0% { left: 16%; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { left: 84%; opacity: 0; } }
+@keyframes packet-l { 0% { left: 84%; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { left: 16%; opacity: 0; } }
+.packet-r { animation: packet-r 1.5s cubic-bezier(.4,0,.2,1) both; }
+.packet-l { animation: packet-l 1.5s cubic-bezier(.4,0,.2,1) both; }
+/* a new transcript line easing in */
+@keyframes msg-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.msg-in { animation: msg-in .45s cubic-bezier(.2,.7,.2,1) both; }
+/* the active agent's "working" ring */
+@keyframes node-ring { 0% { transform: scale(.7); opacity: .55; } 100% { transform: scale(1.9); opacity: 0; } }
+.node-ring { animation: node-ring 1.7s ease-out infinite; }
+/* the approved stamp settling in */
+@keyframes stamp-in { 0% { opacity: 0; transform: scale(1.25) rotate(-4deg); } 60% { opacity: 1; } 100% { opacity: 1; transform: scale(1) rotate(-4deg); } }
+.stamp-in { animation: stamp-in .5s cubic-bezier(.2,.8,.2,1) both; }
+
 @media (prefers-reduced-motion: reduce) {
+  /* Calm the page-level / expanding motion that can actually bother vestibular users… */
   [data-reveal] { opacity: 1; transform: none; transition: none; }
-  .rule-draw, .ring, .livedot, .packet, .animate-ping-slow, .animate-rise { animation: none; }
+  .rule-draw, .ring, .animate-ping-slow, .animate-rise, .skeleton::after { animation: none; }
   .ring { opacity: 0.16; }
+  .lift:hover { transform: none; }
+  /* …but the oscilloscope is the product's identity: its smooth horizontal trace, the sweep
+     beam, the live blip and dots are the "live signal" and stay running (low-risk, contained). */
 }
