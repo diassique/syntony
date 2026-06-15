@@ -39,6 +39,14 @@ def test_debug_downshifts_to_haiku_and_drops_effort():
     assert "reasoning_effort" not in completion_kwargs(cfg, [{"role": "user", "content": "x"}])
 
 
+def test_downshift_tier_caps_claude_keeps_others():
+    # The Sonnet tier: opus→sonnet (effort dropped), but gpt-5.5 is untouched (not a claude slug).
+    rev = LLMConfig.from_role(ROLES["payer.reviewer"], downshift="claude-sonnet-4-6")
+    assert rev.model == "claude-sonnet-4-6" and rev.reasoning_effort is None
+    intake = LLMConfig.from_role(ROLES["provider.intake"], downshift="claude-sonnet-4-6")
+    assert intake.model == "gpt-5.5-2026-04-23"  # not claude → unchanged
+
+
 def test_whole_cast_routes_to_the_aiml_gateway():
     # Every role (incl. Appeals) runs on the AI/ML gateway — one key, one provider.
     cfg = LLMConfig.from_role(ROLES["provider.appeals"])

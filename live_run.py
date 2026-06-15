@@ -28,6 +28,7 @@ from domains.authbridge.roles import ROLES
 from domains.authbridge.runner import llm_narrator, run_authbridge
 from domains.authbridge.schema import Urgency
 from engine.agent_base import Side
+from engine.llm import BALANCED_MODEL
 from protocol import Envelope, Kind, State, Visibility
 
 #: Default demo scenario: the deny→appeal→overturn golden case.
@@ -142,8 +143,11 @@ async def execute_live_run(run_id: str, case_name: str, *, request=None, full: b
     tools_for, room_id = _build_tools_for(f"live-{case_name}")
     paused = False
     try:
+        # Live demo runs the Sonnet tier (crisp + framework-reliable, no opus on every click);
+        # `full` uses the declared models (opus reviewer) for crisp pitch-video recording.
+        narrate = llm_narrator() if full else llm_narrator(downshift=BALANCED_MODEL)
         res = await run_authbridge(
-            case_name, tools_for=tools_for, narrate=llm_narrator(debug=not full),
+            case_name, tools_for=tools_for, narrate=narrate,
             case_id=f"live-{case_name}", on_turn=on_turn, request=request, criteria=criteria,
             pause_states={State.ARBITER},  # a borderline case pauses for the human Medical Director
         )

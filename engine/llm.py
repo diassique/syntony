@@ -49,6 +49,9 @@ OCR_MODEL = "mistral/mistral-ocr-latest"      # /v1/ocr → pages[].markdown
 # are BARE (no `anthropic/` prefix), and Haiku alone carries its date suffix — opus/sonnet
 # don't. See NOTES_AIML.md "VERIFIED LIVE".
 DEBUG_MODEL = "claude-haiku-4-5-20251001"
+# Balanced downshift target for the live demo: crisp output + reliable framework structured
+# output, without the priciest opus tier on every run. opus→sonnet; sonnet/gpt-5.5 stay as-is.
+BALANCED_MODEL = "claude-sonnet-4-6"
 
 
 class LLMKeyMissing(RuntimeError):
@@ -73,22 +76,26 @@ class LLMConfig:
     extra_body: dict[str, Any] = field(default_factory=dict)  # escape hatch for per-model params
 
     @classmethod
-    def from_role(cls, spec: "RoleSpec", *, debug: bool = False) -> "LLMConfig":  # noqa: F821
+    def from_role(cls, spec: "RoleSpec", *, debug: bool = False, downshift: str | None = None) -> "LLMConfig":  # noqa: F821
         """Bind a declarative ``RoleSpec`` to a concrete config.
 
         Provider is chosen by the model slug's prefix (``featherless/`` → Featherless,
         everything else → AI/ML). ``reasoning_effort`` is read from ``spec.extra``.
 
-        ``debug=True`` downshifts any Anthropic role to the cheap Haiku tier for cheap
-        iteration on the live loop, and drops ``reasoning_effort`` (Haiku can't take it).
+        Downshift tier (cost/quality dial for the live loop): ``debug=True`` caps Anthropic
+        roles at the cheap Haiku tier; ``downshift="claude-sonnet-4-6"`` caps them at Sonnet
+        (the balanced live default). Either drops ``reasoning_effort`` (the cheaper tier can't
+        take thinking, and it conflicts with the frameworks' structured output). ``downshift``
+        wins over ``debug`` when both are given; neither → the role's declared model.
         """
         model = spec.model
         if model is None:
             raise ValueError(f"Role {spec.id!r} has no model (is it a HUMAN role?)")
 
         effort = spec.extra.get("reasoning_effort")
-        if debug and model.startswith("claude"):  # AI/ML Claude slugs are bare, not anthropic/-prefixed
-            model, effort = DEBUG_MODEL, None
+        target = downshift or (DEBUG_MODEL if debug else None)
+        if target and model.startswith("claude") and model != target:  # AI/ML Claude slugs are bare
+            model, effort = target, None
 
         if model.startswith("featherless/"):
             base_url, api_key_env = FEATHERLESS_BASE_URL, "FEATHERLESS_API_KEY"

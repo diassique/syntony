@@ -415,10 +415,11 @@ def _parse_turn(text: str, *, fallback: str) -> dict:
     return {"message": plain, "reasoning": fallback}
 
 
-def llm_narrator(*, debug: bool = True) -> Narrator:
+def llm_narrator(*, debug: bool = True, downshift: str | None = None) -> Narrator:
     """Build a narrator backed by the AI/ML gateway (via ``engine.llm``).
 
-    ``debug=True`` runs reasoning roles on the cheap Haiku tier (and drops reasoning_effort).
+    ``debug``/``downshift`` set the model tier (see ``LLMConfig.from_role``): debug → Haiku,
+    ``downshift="claude-sonnet-4-6"`` → Sonnet (the live default), neither → declared models.
     Clients are cached per provider (base_url + key env), not per model.
     """
     clients: dict[tuple[str, str], Any] = {}
@@ -441,20 +442,22 @@ def llm_narrator(*, debug: bool = True) -> Narrator:
             "with exactly two string fields: `message` (1–2 sentences addressing the counterpart "
             "by role, no PHI) and `reasoning` (one brief sentence). Phrase the facts; never override them."
         )
-        cfg = LLMConfig.from_role(spec, debug=debug)
+        cfg = LLMConfig.from_role(spec, debug=debug, downshift=downshift)
         # Roles backed by a wired framework (Pydantic AI / LangGraph) run their turn THROUGH it;
         # the model is served via the AI/ML gateway. Best-effort: fall through on any failure.
         fw = turn_fn(spec.framework.value)
         if fw is not None:
             try:
                 out = fw(cfg=cfg, system_prompt=spec.system_prompt, user=user)
-                # A weak model can still bury/blob the message; run it through the same cleaner.
-                msg = _parse_turn(out.get("message", ""), fallback="")["message"]
+                # The framework message is already cleaned; reject only an actual JSON blob (a weak
+                # model occasionally packs an envelope into the field) — no length cap on clean prose.
+                msg = (out.get("message") or "").strip()
                 if msg and not msg.startswith(("{", "[")):
                     # `via` records the path that actually produced this turn (provenance).
                     return {"message": msg, "reasoning": out.get("reasoning") or msg, "via": spec.framework.value}
-            except Exception:  # noqa: BLE001 — framework hiccup → fall back to the gateway
-                pass
+                print(f"narrator: {role_id} {spec.framework.value} output unusable → gateway", flush=True)
+            except Exception as e:  # noqa: BLE001 — framework hiccup → fall back to the gateway
+                print(f"narrator: {role_id} {spec.framework.value} failed → gateway: {type(e).__name__}: {str(e)[:150]}", flush=True)
         try:
             cfg = replace(cfg, response_format=AGENT_SCHEMA)
             kwargs = completion_kwargs(
