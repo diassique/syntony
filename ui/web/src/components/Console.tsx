@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { runsApi, type AuditEvent, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
 import { Wordmark } from './Logo'
+import { Button, Select } from './ui'
 
 type View = 'overview' | 'cases' | 'settings'
 
@@ -80,20 +81,14 @@ function RunCaseButton({ onRunCase, starting, subtle }: { onRunCase: (caseName?:
   const [scenario, setScenario] = useState(SCENARIOS[0].id)
   return (
     <div className="inline-flex items-center gap-2">
-      <label className="sr-only" htmlFor="scenario">Scenario</label>
-      <select id="scenario" value={scenario} onChange={(e) => setScenario(e.target.value)} disabled={starting}
-        className="rounded-lg border border-line bg-paper px-2.5 py-2 font-mono text-[11px] text-ink-soft transition-colors hover:border-pine/40 disabled:opacity-60">
-        {SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-      </select>
-      <button onClick={() => onRunCase(scenario)} disabled={starting}
-        className={`group inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[13px] font-medium transition-colors disabled:opacity-60 ${
-          subtle ? 'border border-pine/40 text-pine hover:bg-pine/[0.06]' : 'bg-coral text-bone hover:bg-coral/90'}`}>
-        {starting ? (
-          <><Spinner /> Starting a live case…</>
-        ) : (
-          <><span aria-hidden className="text-[15px] leading-none">▶</span> Run a live case</>
-        )}
-      </button>
+      <Select aria-label="Scenario" size="md" value={scenario} disabled={starting}
+        onValueChange={setScenario}
+        options={SCENARIOS.map((s) => ({ label: s.label, value: s.id }))} />
+      <Button variant={subtle ? 'secondary' : 'signal'} size="md" loading={starting}
+        leadingIcon={<span aria-hidden className="text-[15px] leading-none">▶</span>}
+        onClick={() => onRunCase(scenario)}>
+        {starting ? 'Starting a live case…' : 'Run a live case'}
+      </Button>
     </div>
   )
 }
@@ -139,6 +134,9 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
               <div className="truncate text-[13px] font-semibold leading-tight">{org.name}</div>
               <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-pine">{org.plan} plan</div>
             </div>
+          </div>
+          <div className="mt-2.5 flex items-center gap-1.5 border-t border-line pt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-faint">
+            <span className="livedot h-1.5 w-1.5 rounded-full bg-pine" /> connected to the mesh
           </div>
         </div>
       )}
@@ -195,10 +193,21 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, startin
       {error && <Banner>{error}</Banner>}
 
       <div className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
-        <Metric label="Cases" value={m.cases} />
-        <Metric label="Approval rate" value={m.approvalRate} suffix="%" dim={m.decided === 0} />
-        <Metric label="Avg turns" value={m.avgTurns} oneDecimal />
-        <Metric label="Private notes" value={m.privateEvents} accent />
+        {runs === null ? (
+          [0, 1, 2, 3].map((i) => (
+            <div key={i} className="bg-paper px-5 py-6">
+              <span className="skeleton block h-8 w-16 rounded" />
+              <span className="skeleton mt-3 block h-2.5 w-20 rounded" />
+            </div>
+          ))
+        ) : (
+          <>
+            <Metric label="Cases" value={m.cases} />
+            <Metric label="Approval rate" value={m.approvalRate} suffix="%" dim={m.decided === 0} />
+            <Metric label="Avg turns" value={m.avgTurns} oneDecimal />
+            <Metric label="Private notes" value={m.privateEvents} accent />
+          </>
+        )}
       </div>
 
       <div className="mt-10 mb-4 flex items-baseline justify-between">
@@ -284,10 +293,27 @@ function CaseList({ runs, onOpen, onRunCase, starting }: {
   runs: RunSummary[] | null; onOpen: (id: string) => void
   onRunCase?: () => void; starting?: boolean
 }) {
-  if (!runs) return <p className="font-mono text-[12px] text-ink-faint">Loading cases…</p>
+  if (!runs)
+    return (
+      <div className="space-y-2.5">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex items-center gap-4 rounded-xl border border-line bg-paper px-5 py-4">
+            <span className="skeleton h-2.5 w-2.5 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <span className="skeleton block h-3.5 w-40 rounded" />
+              <span className="skeleton block h-2.5 w-24 rounded" />
+            </div>
+            <span className="skeleton h-5 w-16 rounded" />
+          </div>
+        ))}
+      </div>
+    )
   if (runs.length === 0)
     return (
-      <div className="rounded-2xl border border-dashed border-line bg-sunk/40 p-8 text-center">
+      <div className="rounded-2xl border border-dashed border-line bg-sunk/40 p-10 text-center">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-line bg-paper">
+          <span className="livedot h-2.5 w-2.5 rounded-full bg-coral" />
+        </div>
         <div className="font-display text-lg font-semibold">No cases yet</div>
         <p className="mx-auto mt-2 max-w-sm text-[14px] text-ink-soft">Run a live provider↔payer negotiation — it streams in here, audited for your organization.</p>
         {onRunCase && <div className="mt-5 flex justify-center"><RunCaseButton onRunCase={onRunCase} starting={!!starting} /></div>}
@@ -295,23 +321,39 @@ function CaseList({ runs, onOpen, onRunCase, starting }: {
     )
   return (
     <div className="space-y-2.5">
-      {runs.map((r, i) => (
-        <button key={r.id} onClick={() => onOpen(r.id)} style={{ animationDelay: `${i * 50}ms` }}
-          className="animate-rise group flex w-full items-center gap-4 rounded-xl border border-line bg-paper px-5 py-4 text-left transition-all hover:border-pine/40 hover:shadow-[0_12px_30px_-22px_rgba(14,19,17,0.5)]">
-          <StatusDot status={r.status} />
-          <div className="min-w-0">
-            <div className="truncate font-display text-[15px] font-semibold">{caseTitle(r.case_name)}</div>
-            <div className="font-mono text-[11px] text-ink-faint">{fmtTime(r.started_at)} · {r.turns} turns</div>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <OutcomeBadge outcome={r.outcome} />
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint sm:inline">{r.events} msgs</span>
-            {r.private_events > 0 && <LockChip n={r.private_events} />}
-            <span className="font-mono text-ink-faint transition-transform group-hover:translate-x-0.5">→</span>
-          </div>
-        </button>
-      ))}
+      {runs.map((r, i) => {
+        const running = r.status === 'running'
+        return (
+          <button key={r.id} onClick={() => onOpen(r.id)} style={{ animationDelay: `${i * 50}ms` }}
+            className="animate-rise lift group flex w-full items-center gap-4 rounded-xl border border-line bg-paper px-5 py-4 text-left hover:border-pine/40">
+            <StatusDot status={r.status} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate font-display text-[15px] font-semibold">{caseTitle(r.case_name)}</span>
+                {r.urgency === 'expedited' && <ExpeditedChip />}
+              </div>
+              <div className="font-mono text-[11px] text-ink-faint">
+                {running ? <span className="text-coral">running…</span> : fmtTime(r.started_at)} · {r.turns} turns
+              </div>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              {running ? <LivePill /> : <OutcomeBadge outcome={r.outcome} />}
+              <span className="hidden font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint sm:inline">{r.events} msgs</span>
+              {r.private_events > 0 && <LockChip n={r.private_events} />}
+              <span className="font-mono text-ink-faint transition-transform group-hover:translate-x-0.5">→</span>
+            </div>
+          </button>
+        )
+      })}
     </div>
+  )
+}
+
+function ExpeditedChip() {
+  return (
+    <span className="flex items-center gap-1 rounded-md border border-coral/40 bg-coral/[0.06] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-coral">
+      <ClockGlyph /> 72h
+    </span>
   )
 }
 
@@ -326,6 +368,20 @@ function LivePill() {
       </span>
       Live
     </span>
+  )
+}
+
+/** Copyable run id — a small audit-y affordance (click to copy the full UUID). */
+function RunIdChip({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    navigator.clipboard?.writeText(id).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1400) }).catch(() => {})
+  }
+  return (
+    <button onClick={copy} title="Copy run id"
+      className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint transition-colors hover:border-pine/40 hover:text-ink">
+      run {id.slice(0, 8)} <span className={copied ? 'text-pine' : 'text-ink-faint'}>{copied ? '✓ copied' : '⧉'}</span>
+    </button>
   )
 }
 
@@ -401,6 +457,16 @@ function Theater({ runId, orgName, onBack, onComplete }: {
         <span>{fmtTime(run.started_at)}</span><span>·</span>
         <span>{run.events} messages</span><span>·</span>
         <span className="text-coral">{run.private_events} private to you</span>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <RunIdChip id={run.id} />
+        {run.room_id && (
+          <a href={`/?room=${run.room_id}#/live`} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine">
+            <span className="h-1.5 w-1.5 rounded-full bg-coral" /> view Band room ↗
+          </a>
+        )}
       </div>
 
       <SlaBanner run={run} />
@@ -610,7 +676,8 @@ function Metric({ label, value, suffix, oneDecimal, accent, dim }: {
   const shown = useCountUp(value)
   const text = dim ? '—' : (oneDecimal ? shown.toFixed(1) : Math.round(shown).toString())
   return (
-    <div className="bg-paper px-5 py-6">
+    <div className="group relative bg-paper px-5 py-6 transition-colors hover:bg-bone/50">
+      <span className={`absolute inset-x-0 top-0 h-0.5 opacity-0 transition-opacity duration-300 group-hover:opacity-100 ${accent ? 'bg-coral' : 'bg-pine'}`} aria-hidden />
       <div className={`font-mono text-[34px] font-medium leading-none tabular-nums tracking-tight ${accent ? 'text-coral' : 'text-ink'}`}>
         {text}{!dim && suffix ? <span className="text-ink-faint">{suffix}</span> : null}
       </div>
