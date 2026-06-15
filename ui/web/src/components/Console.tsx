@@ -7,12 +7,12 @@
  * asymmetry — visible at a glance — is the cross-org privacy moat. */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { runsApi, agentsApi, type AgentInfo, type AuditEvent, type RunDetail, type RunSummary } from '../api'
+import { runsApi, agentsApi, type AgentInfo, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
 import { Wordmark } from './Logo'
 import { Badge, Button, Select } from './ui'
 
-type View = 'overview' | 'cases' | 'agents' | 'settings'
+type View = 'overview' | 'cases' | 'agents' | 'insights' | 'settings'
 
 export default function Console() {
   const { user, org, logout } = useAuth()
@@ -61,6 +61,8 @@ export default function Console() {
             <Cases runs={runs} error={error} onOpen={open} onRunCase={runLiveCase} starting={starting} />
           ) : view === 'agents' ? (
             <AgentsView />
+          ) : view === 'insights' ? (
+            <InsightsView />
           ) : (
             <Settings user={user} org={org} />
           )}
@@ -116,6 +118,7 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
     { id: 'overview', label: 'Overview' },
     { id: 'cases', label: 'Cases' },
     { id: 'agents', label: 'Agents' },
+    { id: 'insights', label: 'Insights' },
     { id: 'settings', label: 'Settings' },
   ]
   return (
@@ -434,6 +437,7 @@ function Theater({ runId, orgName, onBack, onComplete }: {
   const [detail, setDetail] = useState<RunDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deciding, setDeciding] = useState(false)
+  const [exporting, setExporting] = useState(false)
   // Poll while the run is RUNNING so a live negotiation streams in turn by turn; stop once it
   // finishes (and refresh the caller's list). A finished run opened from the list fetches once.
   useEffect(() => {
@@ -500,6 +504,21 @@ function Theater({ runId, orgName, onBack, onComplete }: {
     }
   }
 
+  const exportPdf = async () => {
+    setExporting(true)
+    try {
+      downloadBlob(await runsApi.exportPdf(run.id), `audit-${run.case_name}-${run.id.slice(0, 8)}.pdf`)
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    } finally {
+      setExporting(false)
+    }
+  }
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify(detail, null, 2)], { type: 'application/json' })
+    downloadBlob(blob, `audit-${run.case_name}-${run.id.slice(0, 8)}.json`)
+  }
+
   return (
     <div>
       {back}
@@ -525,6 +544,14 @@ function Theater({ runId, orgName, onBack, onComplete }: {
             <span className="h-1.5 w-1.5 rounded-full bg-coral" /> view Band room ↗
           </a>
         )}
+        <button onClick={exportPdf} disabled={exporting} title="Download audit PDF"
+          className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine disabled:opacity-60">
+          {exporting ? 'exporting…' : '↓ PDF'}
+        </button>
+        <button onClick={exportJson} title="Download audit JSON"
+          className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine">
+          ↓ JSON
+        </button>
       </div>
 
       <SlaBanner run={run} />
@@ -680,6 +707,137 @@ function SealedNote({ org }: { org: string }) {
       </div>
     </div>
   )
+}
+
+/* ─── insights ──────────────────────────────────────────────────────────────
+   Audit analytics aggregated server-side over the org's runs: outcomes, overturns,
+   turnaround, SLA adherence, denial-reason mix, and per-agent participation. */
+function InsightsView() {
+  const [data, setData] = useState<Insights | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    runsApi.insights().then(setData).catch((e) => setError(String(e?.message || e)))
+  }, [])
+
+  return (
+    <>
+      <Kicker>Audit analytics</Kicker>
+      <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">Insights</h1>
+      <p className="mt-3 max-w-xl text-ink-soft">Outcomes, turnaround, SLA adherence and where decisions turn — aggregated across every case your organization took part in.</p>
+      {error && <Banner>{error}</Banner>}
+
+      {!data ? (
+        <div className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="bg-paper px-5 py-6"><span className="skeleton block h-8 w-16 rounded" /><span className="skeleton mt-3 block h-2.5 w-20 rounded" /></div>
+          ))}
+        </div>
+      ) : data.cases === 0 ? (
+        <div className="mt-8 rounded-2xl border border-dashed border-line bg-sunk/40 p-10 text-center">
+          <div className="font-display text-lg font-semibold">No data yet</div>
+          <p className="mx-auto mt-2 max-w-sm text-[14px] text-ink-soft">Run a few cases and the analytics populate here.</p>
+        </div>
+      ) : (
+        <>
+          <div className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+            <Metric label="Cases" value={data.cases} />
+            <Metric label="Approval rate" value={data.approval_rate} suffix="%" dim={data.decided === 0} />
+            <Metric label="Overturns" value={data.overturns} accent />
+            <TurnaroundTile sec={data.avg_turnaround_sec} />
+          </div>
+
+          <div className="mt-8 grid gap-6 lg:grid-cols-2">
+            <Panel title="Outcomes">
+              <SegBar segments={[['bg-pine', data.approvals], ['bg-coral', data.denials], ['bg-ink-faint/30', data.cases - data.decided]]} />
+              <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] text-ink-soft">
+                <Legend dot="bg-pine" label={`${data.approvals} approved`} />
+                <Legend dot="bg-coral" label={`${data.denials} denied`} />
+                {data.overturns > 0 && <Legend dot="bg-pine/50" label={`${data.overturns} overturned`} />}
+              </div>
+            </Panel>
+
+            <Panel title="CMS-0057-F SLA adherence">
+              <SegBar segments={[['bg-pine', data.within_sla], ['bg-coral', data.past_sla]]} />
+              <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] text-ink-soft">
+                <Legend dot="bg-pine" label={`${data.within_sla} within SLA`} />
+                <Legend dot="bg-coral" label={`${data.past_sla} past SLA`} />
+                <span className="ml-auto text-ink-faint">{data.expedited} expedited · {data.standard} standard</span>
+              </div>
+            </Panel>
+
+            <Panel title="Denial reasons">
+              {data.denial_reasons.length
+                ? <BarList items={data.denial_reasons.map((d) => ({ label: prettyReason(d.reason), value: d.count }))} tone="coral" />
+                : <p className="text-[13px] text-ink-soft">No adverse determinations recorded.</p>}
+            </Panel>
+
+            <Panel title="Agent participation">
+              <BarList items={data.agents.map((a) => ({ label: prettyAuthor(a.author), value: a.runs }))} tone="pine" />
+            </Panel>
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-line bg-paper p-5">
+      <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">{title}</div>
+      <div className="mt-4">{children}</div>
+    </div>
+  )
+}
+
+function SegBar({ segments }: { segments: [string, number][] }) {
+  const total = segments.reduce((s, [, n]) => s + n, 0) || 1
+  return (
+    <div className="flex h-3 overflow-hidden rounded-full bg-sunk">
+      {segments.map(([cls, n], i) => (n > 0 ? <div key={i} className={cls} style={{ width: `${(n / total) * 100}%` }} /> : null))}
+    </div>
+  )
+}
+
+function Legend({ dot, label }: { dot: string; label: string }) {
+  return <span className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${dot}`} />{label}</span>
+}
+
+function BarList({ items, tone }: { items: { label: string; value: number }[]; tone: 'pine' | 'coral' }) {
+  const max = Math.max(...items.map((i) => i.value), 1)
+  const bar = tone === 'coral' ? 'bg-coral' : 'bg-pine'
+  return (
+    <div className="space-y-2.5">
+      {items.map((it, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <span className="w-36 shrink-0 truncate text-[12px] text-ink-soft">{it.label}</span>
+          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-sunk">
+            <div className={`h-full rounded-full ${bar}`} style={{ width: `${(it.value / max) * 100}%` }} />
+          </div>
+          <span className="w-6 shrink-0 text-right font-mono text-[11px] tabular-nums text-ink">{it.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TurnaroundTile({ sec }: { sec: number }) {
+  const [n, u] = fmtDuration(sec)
+  return (
+    <div className="group relative bg-paper px-5 py-6 transition-colors hover:bg-bone/50">
+      <span className="absolute inset-x-0 top-0 h-0.5 bg-pine opacity-0 transition-opacity duration-300 group-hover:opacity-100" aria-hidden />
+      <div className="font-mono text-[34px] font-medium leading-none tabular-nums tracking-tight text-ink">{n}<span className="text-ink-faint">{u}</span></div>
+      <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">Avg turnaround</div>
+    </div>
+  )
+}
+
+function fmtDuration(sec: number): [string, string] {
+  if (!sec) return ['—', '']
+  if (sec < 90) return [String(sec), 's']
+  if (sec < 5400) return [String(Math.round(sec / 60)), 'm']
+  if (sec < 172800) return [String(Math.round(sec / 3600)), 'h']
+  return [String(Math.round(sec / 86400)), 'd']
 }
 
 /* ─── agents / mesh ─────────────────────────────────────────────────────────
@@ -912,6 +1070,17 @@ function Kicker({ children }: { children: React.ReactNode }) {
 
 function Banner({ children }: { children: React.ReactNode }) {
   return <div className="mt-6 rounded-md border border-coral/40 bg-coral/5 px-3 py-2 text-[13px] text-coral">{children}</div>
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 function caseTitle(s: string): string {

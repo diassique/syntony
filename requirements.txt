@@ -12,6 +12,7 @@ openai>=1.40,<2
 # UI (L4 spectator dashboard)
 fastapi>=0.115,<1
 uvicorn>=0.30,<1
+reportlab>=4,<5             # server-side audit-record PDF export
 
 # Control plane (users/orgs/auth/persistence/metering) — Postgres via SQLModel.
 sqlmodel>=0.0.21,<0.1

@@ -138,6 +138,35 @@ export const runsApi = {
   /** Human-in-the-loop: the payer Medical Director resolves a paused borderline case. */
   decide: (id: string, outcome: 'APPROVE' | 'DENY') =>
     request<{ run_id: string; outcome: string; status: string }>(`/api/runs/${id}/decide`, { method: 'POST', auth: true, body: { outcome } }),
+  /** Aggregate metrics across the org's runs (for the Insights view). */
+  insights: () => request<Insights>('/api/runs/insights', { auth: true }),
+  /** Download the case's audit trail as a compliance PDF (authed binary fetch → Blob). */
+  exportPdf: async (id: string, retry = true): Promise<Blob> => {
+    const res = await fetch(`/api/runs/${id}/export.pdf`, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      credentials: 'include',
+    })
+    if (res.status === 401 && retry && (await refreshSession())) return runsApi.exportPdf(id, false)
+    if (!res.ok) throw new ApiError(res.status, `export failed (${res.status})`)
+    return res.blob()
+  },
+}
+
+export interface Insights {
+  cases: number
+  decided: number
+  approvals: number
+  denials: number
+  approval_rate: number
+  overturns: number
+  avg_turns: number
+  avg_turnaround_sec: number
+  expedited: number
+  standard: number
+  within_sla: number
+  past_sla: number
+  denial_reasons: { reason: string; count: number }[]
+  agents: { author: string; runs: number }[]
 }
 
 export interface AgentInfo {

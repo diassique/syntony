@@ -263,6 +263,70 @@ def list_runs(org_id: str = Depends(current_org_id), sess: Session = Depends(get
     return out
 
 
+@runs_router.get("/insights")
+def run_insights(org_id: str = Depends(current_org_id), sess: Session = Depends(get_session)) -> dict:
+    """Aggregate metrics over the runs my org took part in — outcomes, overturns, turnaround,
+    SLA adherence, denial-reason mix, and per-agent participation. Registered before
+    ``/{run_id}`` so the literal path wins. Org-scoped, like the rest of the audit surface."""
+    from datetime import timedelta
+
+    run_ids = sess.exec(select(Event.run_id).where(Event.org_id == org_id).distinct()).all()
+    runs = sess.exec(select(Run).where(Run.id.in_(run_ids))).all() if run_ids else []
+    events = sess.exec(select(Event).where(Event.org_id == org_id)).all() if run_ids else []
+
+    by_run: dict[str, list[Event]] = {}
+    for e in events:
+        by_run.setdefault(e.run_id, []).append(e)
+
+    cases = len(runs)
+    approvals = sum(1 for r in runs if r.outcome == "APPROVE")
+    denials = sum(1 for r in runs if r.outcome == "DENY")
+    decided = approvals + denials
+    overturns = sum(
+        1 for r in runs if any(ev.payload.get("pa_event") == "DECISION_OVERTURNED" for ev in by_run.get(r.id, []))
+    )
+    turns = [r.turns for r in runs if r.turns]
+    durations = [(r.ended_at - r.started_at).total_seconds() for r in runs if r.ended_at]
+    expedited = sum(1 for r in runs if r.urgency == "expedited")
+
+    within = past = 0
+    for r in runs:
+        if not r.ended_at:
+            continue
+        deadline = r.started_at + timedelta(hours=72 if r.urgency == "expedited" else 168)
+        within, past = (within + 1, past) if r.ended_at <= deadline else (within, past + 1)
+
+    reason_counts: dict[str, int] = {}
+    agent_counts: dict[str, int] = {}
+    for r in runs:
+        evs = by_run.get(r.id, [])
+        for rs in {ev.payload.get("denial_reason") for ev in evs if ev.payload.get("denial_reason")}:
+            reason_counts[rs] = reason_counts.get(rs, 0) + 1
+        for a in {ev.author for ev in evs}:
+            agent_counts[a] = agent_counts.get(a, 0) + 1
+
+    return {
+        "cases": cases,
+        "decided": decided,
+        "approvals": approvals,
+        "denials": denials,
+        "approval_rate": round(approvals / decided * 100) if decided else 0,
+        "overturns": overturns,
+        "avg_turns": round(sum(turns) / len(turns), 1) if turns else 0,
+        "avg_turnaround_sec": round(sum(durations) / len(durations)) if durations else 0,
+        "expedited": expedited,
+        "standard": cases - expedited,
+        "within_sla": within,
+        "past_sla": past,
+        "denial_reasons": sorted(
+            [{"reason": k, "count": v} for k, v in reason_counts.items()], key=lambda x: -x["count"]
+        ),
+        "agents": sorted(
+            [{"author": k, "runs": v} for k, v in agent_counts.items()], key=lambda x: -x["runs"]
+        ),
+    }
+
+
 @runs_router.get("/{run_id}", response_model=RunDetailOut)
 def get_run(run_id: str, org_id: str = Depends(current_org_id),
             sess: Session = Depends(get_session)) -> RunDetailOut:
@@ -281,3 +345,94 @@ def get_run(run_id: str, org_id: str = Depends(current_org_id),
         events=[EventOut(turn=e.turn, author=e.author, kind=e.kind, visibility=e.visibility,
                          payload=e.payload, created_at=e.created_at.isoformat()) for e in events],
     )
+
+
+def _esc(s: str | None) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _audit_pdf(run: Run, events: list[Event], org_name: str) -> bytes:
+    """Render a case's org-scoped audit trail to a compliance PDF packet (lazy reportlab import)."""
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER, title="Audit Record",
+                            topMargin=0.7 * inch, bottomMargin=0.7 * inch,
+                            leftMargin=0.8 * inch, rightMargin=0.8 * inch)
+    base = getSampleStyleSheet()
+    ink, pine, faint, coral = (colors.HexColor(c) for c in ("#0e1311", "#0b5e4f", "#8b918a", "#ff5a3c"))
+    h = ParagraphStyle("h", parent=base["Title"], textColor=ink, fontSize=18, spaceAfter=2, alignment=0)
+    sub = ParagraphStyle("sub", parent=base["Normal"], textColor=faint, fontSize=8.5, leading=12)
+    sec = ParagraphStyle("sec", parent=base["Heading2"], textColor=pine, fontSize=11, spaceBefore=15, spaceAfter=6)
+    meta = ParagraphStyle("meta", parent=base["Normal"], fontSize=8, textColor=faint)
+    body = ParagraphStyle("body", parent=base["Normal"], fontSize=9.5, leading=13, textColor=ink)
+    priv = ParagraphStyle("priv", parent=body, textColor=coral, leftIndent=8)
+
+    el: list = [Paragraph("Prior Authorization — Audit Record", h),
+                Paragraph(f"Syntony · {_esc(org_name)} · compliance export", sub), Spacer(1, 10)]
+    sla = "expedited (72h)" if run.urgency == "expedited" else "standard (7 days)"
+    rows = [
+        ["Case", run.case_name.replace("_", " ")], ["Run ID", run.id],
+        ["Status", run.status], ["Outcome", run.outcome or "—"], ["SLA tier", sla],
+        ["Opened", run.started_at.isoformat(timespec="seconds")],
+        ["Closed", run.ended_at.isoformat(timespec="seconds") if run.ended_at else "—"],
+        ["Turns", str(run.turns)],
+    ]
+    tbl = Table(rows, colWidths=[1.3 * inch, 5.1 * inch])
+    tbl.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 9), ("TEXTCOLOR", (0, 0), (0, -1), faint),
+        ("TEXTCOLOR", (1, 0), (1, -1), ink), ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.4, colors.HexColor("#dcded6")),
+    ]))
+    el.append(tbl)
+
+    el.append(Paragraph("Negotiation timeline", sec))
+    for e in events:
+        if e.visibility != "room":
+            continue
+        ev = (e.payload.get("pa_event") or e.kind or "").lower().replace("_", " ")
+        line = f"<b>turn {e.turn}</b> · {_esc(e.author)} · <font color='#8b918a'>{_esc(ev)}</font>"
+        if e.payload.get("denial_reason"):
+            line += f" · <font color='#ff5a3c'>{_esc(e.payload['denial_reason'].lower().replace('_', ' '))}</font>"
+        el.append(Paragraph(line, meta))
+        el.append(Paragraph(_esc(e.payload.get("message") or "—"), body))
+        el.append(Spacer(1, 5))
+
+    private = [e for e in events if e.visibility == "private_event"]
+    if private:
+        el.append(Paragraph(f"Private reasoning — {_esc(org_name)} only", sec))
+        for e in private:
+            el.append(Paragraph(f"turn {e.turn} · {_esc(e.author)}", meta))
+            el.append(Paragraph(_esc(e.payload.get("reasoning") or "—"), priv))
+            el.append(Spacer(1, 4))
+
+    el.append(Spacer(1, 12))
+    el.append(Paragraph(
+        "Scoped to your organization: every room message plus only your own agents' private "
+        "reasoning. CMS-0057-F specific reasons are retained on adverse determinations.", sub))
+    doc.build(el)
+    return buf.getvalue()
+
+
+@runs_router.get("/{run_id}/export.pdf")
+def export_run_pdf(run_id: str, org_id: str = Depends(current_org_id),
+                   sess: Session = Depends(get_session)) -> Response:
+    """Download the case's audit trail as a compliance PDF — org-scoped, same privacy model."""
+    run = sess.get(Run, run_id)
+    events = sess.exec(
+        select(Event).where(Event.run_id == run_id, Event.org_id == org_id)
+        .order_by(Event.turn, Event.created_at)
+    ).all()
+    if run is None or not events:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found for this organization")
+    org = sess.get(Organization, org_id)
+    pdf = _audit_pdf(run, events, org.name if org else org_id)
+    filename = f"audit-{run.case_name}-{run_id[:8]}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
