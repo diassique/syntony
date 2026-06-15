@@ -32,7 +32,7 @@ const AGENTS = [
   { ch: 'CH1', role: 'Intake', side: 'provider', fw: 'LangGraph', fn: 'frames a FHIR-shaped request from the chart' },
   { ch: 'CH2', role: 'Eligibility & Benefits', side: 'provider', fw: 'Pydantic AI', fn: 'verifies coverage before anything goes out' },
   { ch: 'CH3', role: 'Counsel', side: 'provider', fw: 'Pydantic AI', fn: 'fixes the codes, signatures & docs that cause denials' },
-  { ch: 'CH4', role: 'Provider Appeals', side: 'provider', fw: 'Letta · Featherless', fn: 'cures the cited denial reason and resubmits' },
+  { ch: 'CH4', role: 'Provider Appeals', side: 'provider', fw: 'Letta', fn: 'cures the cited denial reason and resubmits' },
   { ch: 'CH5', role: 'Reviewer', side: 'payer', fw: 'Pydantic AI', fn: 'checks medical-necessity policy; asks only for gaps' },
   { ch: 'CH6', role: 'Clinical Guidelines', side: 'payer', fw: 'Pydantic AI', fn: 'applies MCG/InterQual-style criteria, cites them' },
   { ch: 'CH7', role: 'Pharmacy & Formulary', side: 'payer', fw: 'LangGraph', fn: 'checks formulary tier & step-therapy for drugs' },
@@ -48,7 +48,7 @@ const LAYERS = [
   { n: 'L4', t: 'Console', spec: 'multi-tenant control plane · audit', d: 'A per-organization audit theater — what you log into.' },
 ]
 
-const TECH = ['Band agentic mesh', 'AI/ML API', 'Anthropic Claude', 'LangGraph', 'Pydantic AI', 'Letta', 'Featherless', 'PostgreSQL']
+const TECH = ['Band agentic mesh', 'AI/ML API', 'Anthropic Claude', 'LangGraph', 'Pydantic AI', 'CrewAI', 'Letta', 'PostgreSQL']
 
 /* ── motion: scroll-reveal ─────────────────────────────────────────────── */
 function useReveal() {

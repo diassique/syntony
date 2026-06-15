@@ -4,13 +4,12 @@ Reasoning prompts live here (not in the engine). Each role names the framework t
 backs it and the L1 states it acts in. Names are meaningful — Band routes on them, and
 "Assistant"/"Bot" degrade routing.
 
-Model slugs target the **AI/ML API** gateway (`https://api.aimlapi.com/v1`) for the closed
-models (partner prize); the Appeals role runs an open model via **Featherless**. The engine
-binds these to a concrete client in `engine.llm` — agent code never sees a provider.
+Model slugs target the **AI/ML API** gateway (`https://api.aimlapi.com/v1`, the partner prize):
+one key, 400+ models. The engine binds these to a concrete client in `engine.llm` — agent code
+never sees a provider, and the seam can route any role to any OpenAI-compatible endpoint.
 Slugs VERIFIED LIVE against the AI/ML catalog (2026-06-13, see NOTES_AIML.md): they are
 **bare** (no `anthropic/`/`openai/` prefix) — `claude-opus-4-8`, `claude-sonnet-4-6`,
-`gpt-5.5-2026-04-23`. The `featherless/*` slug is our routing convention for the open-model
-role (separate provider, key not yet set) — verify against Featherless before that goes live.
+`gpt-5.5-2026-04-23`.
 Per-role LLM knobs (reasoning_effort, temperature) live in `extra` so the engine can read
 them in `LLMConfig.from_role` without the role data depending on the LLM layer.
 """
@@ -170,10 +169,7 @@ ROLES: dict[str, RoleSpec] = {
         display_name="Provider Appeals",
         side=Side.PROVIDER,   # appeals on the clinic's behalf → posts as clinic, audited to its org
         framework=Framework.LETTA,
-        # Intended open-model home = Featherless (2nd partner prize). FEATHERLESS_API_KEY is not yet
-        # populated, so the narrator falls back gracefully; swap to a VERIFIED Featherless slug once
-        # the key is provided. Until then narration (when enabled) routes via the working AI/ML gateway.
-        model="featherless/deepseek-chat",   # UNVERIFIED slug — confirm before claiming live
+        model="claude-sonnet-4-6",   # via the AI/ML gateway, like the rest of the cast
         acts_in=(State.REVISE, State.RECRUIT, State.INFO),
         system_prompt=(
             f"{_PROTOCOL_PRIMER}\n\n"

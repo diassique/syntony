@@ -421,7 +421,7 @@ def llm_narrator(*, debug: bool = True) -> Narrator:
             resp = _client(cfg).chat.completions.create(**kwargs)
             return _parse_turn(resp.choices[0].message.content or "", fallback=facts)
         except Exception:  # noqa: BLE001 — a provider/key/slug failure must never break the run
-            # Graceful degradation: phrase deterministically (e.g. Featherless key not yet set).
+            # Graceful degradation: phrase deterministically (e.g. the LLM gateway is unavailable).
             return {"message": facts, "reasoning": facts}
 
     return narrate

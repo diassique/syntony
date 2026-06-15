@@ -10,8 +10,8 @@ rather than nailed to one vendor — and it's the lever for the AI/ML API partne
 1. *Model* — any of AI/ML API's 400+ models behind one key (`AIML_API_KEY`). Swap the
    ``model`` slug; nothing else changes.
 2. *Provider* — ``base_url`` is per-config. Point a role at any OpenAI-compatible
-   endpoint (Featherless for the open-model role = the second partner prize) without
-   touching engine code.
+   endpoint (a self-hosted/open-model gateway, a second vendor, …) without touching
+   engine code. The default for every role is the AI/ML gateway.
 3. *Framework* — PydanticAI / LangGraph accept a custom OpenAI client, so every
    framework funnels through this one seam (see ``engine.agent_base.build_adapter``).
 
@@ -31,10 +31,11 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 # --- Providers (OpenAI-compatible endpoints) -------------------------------------
-# AI/ML API: confirmed in NOTES_AIML.md. Featherless base_url is UNCONFIRMED — verify
-# against Featherless docs before the open-model role goes live (2nd partner prize).
+# AI/ML API powers every role (confirmed in NOTES_AIML.md). The `featherless/` prefix is
+# kept as a worked example of routing a role to a second OpenAI-compatible endpoint via
+# `base_url` — not used by any role today (base_url UNCONFIRMED; verify before enabling).
 AIML_BASE_URL = "https://api.aimlapi.com/v1"
-FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"  # UNCONFIRMED — verify before wiring
+FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"  # example only — UNCONFIRMED, unused
 
 # Debug downshift target. Cheapest Claude tier on the gateway ($1/$5 per MTok). Haiku is
 # NOT reasoning-capable, so the debug path must NOT send `reasoning_effort` (AI/ML rejects

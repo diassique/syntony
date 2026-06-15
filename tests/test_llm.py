@@ -36,16 +36,17 @@ def test_debug_downshifts_to_haiku_and_drops_effort():
     assert "reasoning_effort" not in completion_kwargs(cfg, [{"role": "user", "content": "x"}])
 
 
-def test_from_role_featherless_prefix_routes_to_featherless():
+def test_whole_cast_routes_to_the_aiml_gateway():
+    # Every role (incl. Appeals) runs on the AI/ML gateway — one key, one provider.
     cfg = LLMConfig.from_role(ROLES["provider.appeals"])
-    assert cfg.base_url == FEATHERLESS_BASE_URL
-    assert cfg.api_key_env == "FEATHERLESS_API_KEY"
+    assert cfg.model == "claude-sonnet-4-6"
+    assert cfg.base_url == AIML_BASE_URL and cfg.api_key_env == "AIML_API_KEY"
 
 
-def test_debug_does_not_touch_open_model_role():
-    # debug only downshifts anthropic/* — the open-model role stays put.
+def test_debug_downshifts_appeals_to_haiku_too():
+    # The 'cheap first' downshift applies uniformly to the claude-backed cast.
     cfg = LLMConfig.from_role(ROLES["provider.appeals"], debug=True)
-    assert cfg.model.startswith("featherless/")
+    assert cfg.model == DEBUG_MODEL
 
 
 def test_from_role_rejects_human():
