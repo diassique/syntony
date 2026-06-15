@@ -96,6 +96,7 @@ class AuthBridgeState:
     pharmacy_done: bool = False        # payer Pharmacy & Formulary consulted (drug cases)
     notified: bool = False             # Member Notification drafted before a terminal decision
     pending_consult: str | None = None  # which specialist the Reviewer is currently consulting
+    retrieved_criteria: str = ""       # RAG: medical-necessity criterion the Guidelines agent cites
 
 
 @dataclass(frozen=True)
@@ -281,9 +282,11 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
         st.pending_consult = None
         if c == "guidelines":
             st.guidelines_done = True
-            return _Plan("payer.guidelines", Kind.PROPOSAL, State.REVIEW,
-                         "Applied evidence-based criteria (MCG/InterQual-style); reported which "
-                         "medical-necessity criteria are met for the requested service.",
+            facts = (f"Retrieved the governing criterion — “{st.retrieved_criteria}” — and "
+                     "assessed the request against it." if st.retrieved_criteria else
+                     "Applied evidence-based criteria (MCG/InterQual-style); reported which "
+                     "medical-necessity criteria are met for the requested service.")
+            return _Plan("payer.guidelines", Kind.PROPOSAL, State.REVIEW, facts,
                          mentions=("payer.reviewer",), pa_event="GUIDELINES_APPLIED")
         if c == "compliance":
             st.compliance_done = True
@@ -478,6 +481,7 @@ async def run_authbridge(
     on_turn: Callable[..., Any] | None = None,
     pause_states: Any = None,
     request: PriorAuthRequest | None = None,
+    criteria: str = "",
 ):
     """Run one AuthBridge case end-to-end through the coordinator.
 
@@ -491,11 +495,11 @@ async def run_authbridge(
     from .cases import ALL_CASES
 
     if request is not None:
-        st = AuthBridgeState(req=request)
+        st = AuthBridgeState(req=request, retrieved_criteria=criteria)
     else:
         if case_name not in ALL_CASES:
             raise KeyError(f"unknown case {case_name!r}; have {sorted(ALL_CASES)}")
-        st = AuthBridgeState(req=ALL_CASES[case_name]())
+        st = AuthBridgeState(req=ALL_CASES[case_name](), retrieved_criteria=criteria)
     return await run_case(
         case_id=case_id or f"authbridge-{case_name}",
         start=State.FRAME,

@@ -129,3 +129,11 @@ def test_plan_is_pure_and_offline():
     st = AuthBridgeState(req=ALL_CASES["mri_lumbar_complete"]())
     p = plan(State.FRAME, st)
     assert p.role_id == "provider.intake" and p.next_state is State.PROPOSE
+
+
+def test_guidelines_cites_the_retrieved_criterion():
+    # RAG: when a criterion was retrieved (embeddings, done in live_run), the Guidelines agent cites it.
+    st = AuthBridgeState(req=ALL_CASES["mri_lumbar_complete"](), retrieved_criteria="SIX-WEEK conservative therapy rule")
+    st.pending_consult = "guidelines"
+    p = plan(State.RECRUIT, st)
+    assert p.role_id == "payer.guidelines" and "SIX-WEEK conservative therapy rule" in p.facts

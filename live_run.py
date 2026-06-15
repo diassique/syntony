@@ -17,6 +17,7 @@ Two entry points:
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 from control import ingest, seed, service
@@ -126,12 +127,24 @@ async def execute_live_run(run_id: str, case_name: str, *, request=None, full: b
                 ingest.record_envelope(sess, run=run, env=env, org_ids=org_ids,
                                        side_to_org=side_to_org, author_side=_author_side)
 
+    # RAG (best-effort): retrieve the governing medical-necessity criterion via embeddings so the
+    # Guidelines agent cites real policy text. Off-loaded (network I/O); failure → generic line.
+    criteria = ""
+    try:
+        from domains.authbridge.criteria import retrieve
+        src = request if request is not None else ALL_CASES[case_name]()
+        query = f"{src.procedure.display} (code {src.procedure.code}); diagnoses {[d.code for d in src.diagnoses]}"
+        hits = await asyncio.to_thread(retrieve, query, 1)
+        criteria = hits[0][1] if hits else ""
+    except Exception as e:  # noqa: BLE001 — retrieval is optional
+        print(f"live_run: criteria retrieval skipped ({type(e).__name__}: {str(e)[:100]})")
+
     tools_for, room_id = _build_tools_for(f"live-{case_name}")
     paused = False
     try:
         res = await run_authbridge(
             case_name, tools_for=tools_for, narrate=llm_narrator(debug=not full),
-            case_id=f"live-{case_name}", on_turn=on_turn, request=request,
+            case_id=f"live-{case_name}", on_turn=on_turn, request=request, criteria=criteria,
             pause_states={State.ARBITER},  # a borderline case pauses for the human Medical Director
         )
         paused = res.stopped == "paused"
