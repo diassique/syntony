@@ -11,7 +11,7 @@ import asyncio
 from band.testing import FakeAgentTools
 
 from domains.authbridge.cases import ALL_CASES
-from domains.authbridge.runner import AuthBridgeState, build_runner, plan, run_authbridge
+from domains.authbridge.runner import AuthBridgeState, _parse_turn, build_runner, plan, run_authbridge
 from engine.coordinator import run_case
 from protocol import Kind, State
 
@@ -129,6 +129,16 @@ def test_plan_is_pure_and_offline():
     st = AuthBridgeState(req=ALL_CASES["mri_lumbar_complete"]())
     p = plan(State.FRAME, st)
     assert p.role_id == "provider.intake" and p.next_state is State.PROPOSE
+
+
+def test_parse_turn_unwraps_verbose_replies_and_falls_back_cleanly():
+    # clean {message,reasoning}
+    assert _parse_turn('{"message":"Hi","reasoning":"r"}', fallback="F") == {"message": "Hi", "reasoning": "r"}
+    # nested envelope with a leading @mention → unwrap + strip the prefix
+    nested = '{"kind":"PROPOSAL","payload":{"to":"@payer.reviewer","message":"@payer.reviewer: Approved."}}'
+    assert _parse_turn(nested, fallback="F")["message"] == "Approved."
+    # an un-parseable blob never leaks — fall back to the clean facts
+    assert _parse_turn('{"weird": [1,2,', fallback="CLEAN FACTS")["message"] == "CLEAN FACTS"
 
 
 def test_guidelines_cites_the_retrieved_criterion():

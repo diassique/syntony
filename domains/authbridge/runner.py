@@ -365,12 +365,32 @@ def _summarize(history: list[Envelope], limit: int = 6) -> str:
     return "\n".join(lines)
 
 
-def _parse_turn(text: str, *, fallback: str) -> dict:
-    """Extract {message, reasoning} from a model turn, robust to weaker models.
+def _find_str(obj: Any, key: str) -> str | None:
+    """Depth-first search for a non-empty string under ``key`` (handles nested envelopes
+    like ``{"payload": {"message": ...}}`` some models emit)."""
+    if isinstance(obj, dict):
+        v = obj.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        for vv in obj.values():
+            r = _find_str(vv, key)
+            if r:
+                return r
+    elif isinstance(obj, list):
+        for vv in obj:
+            r = _find_str(vv, key)
+            if r:
+                return r
+    return None
 
-    Handles strict json_schema output AND the common Haiku-tier deviations: markdown
-    ```json fences, prose around the object, and extra keys (we read only message/reasoning).
-    Falls back to the raw text as the message if no usable JSON is present."""
+
+def _parse_turn(text: str, *, fallback: str) -> dict:
+    """Extract {message, reasoning} from a model turn, robust to weaker/verbose models.
+
+    Handles strict json_schema output AND common deviations: ```json fences, prose around
+    the object, a leading @mention, and over-structured envelopes that bury ``message`` under
+    another key. If nothing usable is found, falls back to the clean deterministic ``facts``
+    (never dumps a raw JSON blob into the room)."""
     s = text.strip()
     if s.startswith("```"):  # strip a ```json ... ``` fence
         s = re.sub(r"^```[a-zA-Z0-9]*\n?", "", s)
@@ -384,9 +404,13 @@ def _parse_turn(text: str, *, fallback: str) -> dict:
             obj = json.loads(c)
         except (ValueError, TypeError):
             continue
-        if isinstance(obj, dict) and isinstance(obj.get("message"), str) and obj["message"].strip():
-            return {"message": obj["message"].strip(), "reasoning": str(obj.get("reasoning") or fallback)}
-    return {"message": s or fallback, "reasoning": fallback}
+        msg = _find_str(obj, "message")
+        if msg:
+            msg = re.sub(r"^@[\w.]+:\s*", "", msg)  # drop a leading "@role:" addressing prefix
+            return {"message": msg, "reasoning": _find_str(obj, "reasoning") or fallback}
+    # No usable JSON object: keep short plain prose, else use the clean facts (not a blob).
+    plain = s if (s and "{" not in s and len(s) <= 400) else fallback
+    return {"message": plain, "reasoning": fallback}
 
 
 def llm_narrator(*, debug: bool = True) -> Narrator:
