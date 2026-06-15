@@ -18,11 +18,29 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Callable
+import time
+from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel
 
 from engine.llm import LLMConfig
+
+_T = TypeVar("_T")
+
+
+def _retry(fn: Callable[[], _T], attempts: int = 2, backoff: float = 0.4) -> _T:
+    """Call ``fn``, retrying on a transient error (429/5xx/timeout). Runs inside a worker
+    thread (``asyncio.to_thread``), so the small sleep doesn't block the event loop. Raises
+    the last error after ``attempts`` retries → the caller falls back to the gateway."""
+    last: Exception | None = None
+    for i in range(attempts + 1):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001 — transient; retry then surface to the caller
+            last = e
+            if i < attempts:
+                time.sleep(backoff * (i + 1))
+    raise last  # type: ignore[misc]
 
 
 class _Turn(BaseModel):
@@ -56,7 +74,7 @@ def pydantic_ai_turn(*, cfg: LLMConfig, system_prompt: str, user: str, max_token
     # provider rejects together with the forced tool-call structured output (output_type). Deep
     # reasoning isn't needed to phrase already-decided facts; reasoning_effort lives on the gateway path.
     agent = Agent(chat, output_type=_Turn, system_prompt=system_prompt, model_settings=settings)
-    out = agent.run_sync(user).output
+    out = _retry(lambda: agent.run_sync(user)).output
     return {"message": _clean(out.message), "reasoning": out.reasoning}
 
 
@@ -95,7 +113,8 @@ def langgraph_turn(*, cfg: LLMConfig, system_prompt: str, user: str, max_tokens:
     graph.add_node("reason", reason)
     graph.add_edge(START, "reason")
     graph.add_edge("reason", END)
-    return graph.compile().invoke({})["out"]
+    app = graph.compile()
+    return _retry(lambda: app.invoke({}))["out"]
 
 
 #: Framework enum value (``RoleSpec.framework.value``) → its turn function, or None (use the gateway).

@@ -178,6 +178,13 @@ def completion_kwargs(
 # request-shaping helpers (``_vision_messages`` / ``_ocr_payload`` / ``loads_json``) are
 # split out so they're testable without a key or network.
 
+def looks_like_blob(text: str) -> bool:
+    """True if a (cleaned) message is actually a raw JSON object/array — a weak model sometimes
+    packs an envelope into the message field. A narrow check (no length cap): callers reject a
+    blob and fall back, but must NOT reject long-but-clean prose (that bug cost us real fallbacks)."""
+    return text.lstrip().startswith(("{", "["))
+
+
 def loads_json(text: str) -> dict[str, Any]:
     """Defensive JSON parse of a model reply: tolerate code fences / surrounding prose by
     extracting the outermost ``{...}``. Returns ``{}`` if nothing parses."""

@@ -26,13 +26,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
+log = logging.getLogger(__name__)
+
 from engine.coordinator import CaseContext, Move
 from engine.frameworks import turn_fn
-from engine.llm import LLMConfig, completion_kwargs, make_client
+from engine.llm import LLMConfig, completion_kwargs, looks_like_blob, make_client
 from protocol import Envelope, Kind, State, Visibility
 
 from .policy import (
@@ -452,12 +455,13 @@ def llm_narrator(*, debug: bool = True, downshift: str | None = None) -> Narrato
                 # The framework message is already cleaned; reject only an actual JSON blob (a weak
                 # model occasionally packs an envelope into the field) — no length cap on clean prose.
                 msg = (out.get("message") or "").strip()
-                if msg and not msg.startswith(("{", "[")):
+                if msg and not looks_like_blob(msg):
                     # `via` records the path that actually produced this turn (provenance).
                     return {"message": msg, "reasoning": out.get("reasoning") or msg, "via": spec.framework.value}
-                print(f"narrator: {role_id} {spec.framework.value} output unusable → gateway", flush=True)
+                log.warning("narrator: %s %s output unusable → gateway", role_id, spec.framework.value)
             except Exception as e:  # noqa: BLE001 — framework hiccup → fall back to the gateway
-                print(f"narrator: {role_id} {spec.framework.value} failed → gateway: {type(e).__name__}: {str(e)[:150]}", flush=True)
+                log.warning("narrator: %s %s failed → gateway: %s: %s",
+                            role_id, spec.framework.value, type(e).__name__, str(e)[:150])
         try:
             cfg = replace(cfg, response_format=AGENT_SCHEMA)
             kwargs = completion_kwargs(
