@@ -25,6 +25,42 @@ from . import service
 from .models import RunStatus
 
 
+def record_envelope(
+    sess: Session,
+    *,
+    run: Any,
+    env: Any,
+    org_ids: list[str],
+    side_to_org: dict[str, str],
+    author_side: Callable[[str], str],
+) -> None:
+    """Record one envelope into the audit trail, enforcing the privacy model:
+
+    - the **room** message is recorded once per participating org (``org_ids``);
+    - the envelope's private ``reasoning`` is recorded as a ``private_event`` for **only the
+      author's side's org**.
+
+    Shared by the batch ``persist_result`` and the live (streamed) run path so both produce
+    byte-identical audit rows.
+    """
+    kind = env.kind.value if hasattr(env.kind, "value") else str(env.kind)
+    message = (env.payload.get("message") or "").strip()
+    room_payload: dict[str, Any] = {"message": message}
+    for k in ("outcome", "pa_event", "denial_reason"):  # carry PA audit semantics through
+        if env.payload.get(k):
+            room_payload[k] = env.payload[k]
+
+    for org_id in org_ids:  # room message → every participating org's audit
+        service.record_event(sess, run=run, org_id=org_id, turn=env.turn, author=env.author,
+                             kind=kind, visibility="room", payload=room_payload)
+
+    reasoning = (env.payload.get("reasoning") or "").strip()
+    author_org = side_to_org.get(author_side(env.author))
+    if reasoning and author_org:  # private reasoning → only the author's side's org
+        service.record_event(sess, run=run, org_id=author_org, turn=env.turn, author=env.author,
+                             kind=kind, visibility="private_event", payload={"reasoning": reasoning})
+
+
 def persist_result(
     sess: Session,
     *,
@@ -50,24 +86,8 @@ def persist_result(
     run.urgency = urgency
 
     for env in result.history:
-        kind = env.kind.value if hasattr(env.kind, "value") else str(env.kind)
-        message = (env.payload.get("message") or "").strip()
-        room_payload: dict[str, Any] = {"message": message}
-        for k in ("outcome", "pa_event", "denial_reason"):  # carry PA audit semantics through
-            if env.payload.get(k):
-                room_payload[k] = env.payload[k]
-
-        # room message → every participating org's audit
-        for org_id in org_ids:
-            service.record_event(sess, run=run, org_id=org_id, turn=env.turn, author=env.author,
-                                 kind=kind, visibility="room", payload=room_payload)
-
-        # private reasoning → only the author's side's org
-        reasoning = (env.payload.get("reasoning") or "").strip()
-        author_org = side_to_org.get(author_side(env.author))
-        if reasoning and author_org:
-            service.record_event(sess, run=run, org_id=author_org, turn=env.turn, author=env.author,
-                                 kind=kind, visibility="private_event", payload={"reasoning": reasoning})
+        record_envelope(sess, run=run, env=env, org_ids=org_ids,
+                        side_to_org=side_to_org, author_side=author_side)
 
     for org_id in org_ids:
         service.record_usage(sess, org_id=org_id, run_id=run.id, kind="run", model=model, units=1)

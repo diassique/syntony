@@ -51,6 +51,7 @@ class PolicyRule:
     required_diagnosis_prefixes: tuple[str, ...] = ()       # e.g. ('M54',) low back pain
     required_docs: tuple[str, ...] = ()                     # missing → REQUEST_INFO (recoverable)
     step_therapy_docs: tuple[str, ...] = ()                 # missing → hard DENY (appealable)
+    red_flag_prefixes: tuple[str, ...] = ()                 # emergent dx → necessity met, docs waived
     auto_approve: bool = False                              # trivially-approved low-cost items
 
 
@@ -59,6 +60,7 @@ POLICY_TABLE: dict[str, PolicyRule] = {
     "72148": PolicyRule(
         required_diagnosis_prefixes=("M54", "M51"),         # low back pain / disc disorder
         required_docs=("conservative_therapy_notes",),      # 6 wks conservative care first
+        red_flag_prefixes=("G83.4", "G82"),                 # cauda equina / cord compression → emergent
     ),
     "73721": PolicyRule(                                    # MRI knee w/o contrast
         required_diagnosis_prefixes=("M23", "M17", "S83"),
@@ -106,6 +108,13 @@ def necessity_decision(req: PriorAuthRequest) -> Decision:
         return Decision(Outcome.APPROVE, ["Procedure is auto-approved under policy."])
 
     dx_codes = [d.code for d in req.diagnoses]
+
+    # Red-flag presentation (e.g. cauda equina) → emergent; necessity is met on clinical urgency
+    # and documentation prerequisites are waived. Checked first so an emergency is never pended.
+    if any(c.startswith(p) for c in dx_codes for p in rule.red_flag_prefixes):
+        return Decision(Outcome.APPROVE, ["Red-flag presentation — emergent imaging is medically "
+                                          "necessary; conservative-care prerequisites waived."])
+
     dx_ok = any(c.startswith(p) for c in dx_codes for p in rule.required_diagnosis_prefixes)
 
     # Diagnosis mismatch → fails, but borderline cases go to a human, not an auto-deny.

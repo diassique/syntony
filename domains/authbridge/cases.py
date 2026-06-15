@@ -66,10 +66,28 @@ def humira_step_therapy_denied() -> PriorAuthRequest:
     )
 
 
+def cauda_equina_urgent() -> PriorAuthRequest:
+    """EMERGENT lumbar MRI for suspected cauda equina (G83.4) — a surgical red flag. Flagged
+    URGENT → the payer must decide within the CMS-0057-F **expedited 72-hour** window, and the
+    red-flag presentation waives the usual conservative-care prerequisite → fast APPROVE. Lights
+    the expedited SLA timer and shows the engine handling time-critical care, not just routine."""
+    return PriorAuthRequest(
+        patient_ref="synthetic-patient-003",
+        procedure=Code(system="CPT", code="72148", display="MRI lumbar spine w/o contrast"),
+        diagnoses=[Code(system="ICD-10-CM", code="G83.4", display="Cauda equina syndrome")],
+        clinical_justification="Acute urinary retention, saddle anesthesia, bilateral leg weakness — "
+                               "suspected cauda equina; emergent MRI to confirm before decompression.",
+        supporting_docs=["imaging_order", "neuro_exam"],  # no conservative-care notes — emergent, waived
+        ordering_provider=_PROVIDER,
+        urgency=Urgency.URGENT,
+    )
+
+
 ALL_CASES = {
     "mri_lumbar_complete": mri_lumbar_complete,
     "mri_lumbar_raw_intake": mri_lumbar_raw_intake,
     "mri_lumbar_missing_docs": mri_lumbar_missing_docs,
     "mri_lumbar_dx_mismatch": mri_lumbar_dx_mismatch,
     "humira_step_therapy_denied": humira_step_therapy_denied,
+    "cauda_equina_urgent": cauda_equina_urgent,
 }

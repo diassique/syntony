@@ -128,3 +128,25 @@ def test_tools_for_routes_each_envelope_to_its_account():
     assert res.final_state is State.DECIDE
     clinic.assert_message_sent(count=1)  # the provider move
     payer.assert_message_sent(count=1)   # the payer move
+
+
+def test_on_turn_fires_once_per_turn_with_envelope_and_new_state():
+    """The streaming hook lets a caller persist/observe each turn as it lands (live theater)."""
+    seen: list[tuple[Kind, State]] = []
+
+    async def on_turn(env, state):  # async hook is awaited
+        seen.append((env.kind, state))
+
+    runner = _scripted([
+        (State.PROPOSE, Kind.CASE_OPEN, Visibility.ROOM, ()),
+        (State.REVIEW, Kind.PROPOSAL, Visibility.ROOM, ()),
+        (State.DECIDE, Kind.DECISION, Visibility.ROOM, ()),
+    ])
+    res = asyncio.run(run_case(case_id="c1", start=State.FRAME, runner=runner, on_turn=on_turn))
+    # one callback per emitted envelope, in order, carrying the post-move state
+    assert seen == [
+        (Kind.CASE_OPEN, State.PROPOSE),
+        (Kind.PROPOSAL, State.REVIEW),
+        (Kind.DECISION, State.DECIDE),
+    ]
+    assert len(seen) == res.turns

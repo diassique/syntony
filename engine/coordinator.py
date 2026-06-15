@@ -23,6 +23,7 @@ domains. ``tools`` is any Band ``AgentToolsProtocol`` (real ``AgentTools`` or
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -86,6 +87,7 @@ async def run_case(
     tools_for: Callable[[Envelope], Any] | None = None,
     domain: Any = None,
     max_turns: int = 24,
+    on_turn: Callable[[Envelope, State], Any] | None = None,
 ) -> CoordinatorResult:
     """Drive one case from ``start`` until terminal / stuck / ``max_turns``.
 
@@ -93,6 +95,10 @@ async def run_case(
     ``tools_for`` (a resolver picking the transport per envelope — e.g. post provider moves
     from the clinic account and payer moves from the payer account). ``tools_for`` takes
     precedence; if both are ``None`` the FSM runs without emitting (offline).
+
+    ``on_turn(envelope, new_state)`` — if given — is invoked after each move is emitted and
+    the state advanced (it may be sync or async); it lets a caller stream the negotiation as
+    it happens (e.g. persist each turn to the live audit trail). It must not raise.
 
     Returns a ``CoordinatorResult`` with the transcript and the stop reason. Raises
     ``IllegalTransition`` if the runner ever proposes a move the FSM forbids, and
@@ -127,3 +133,8 @@ async def run_case(
         ctx.history.append(move.envelope)
         ctx.state = move.next_state
         ctx.turn += 1
+
+        if on_turn is not None:
+            result = on_turn(move.envelope, ctx.state)
+            if inspect.isawaitable(result):
+                await result

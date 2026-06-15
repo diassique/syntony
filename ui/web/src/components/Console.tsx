@@ -19,15 +19,31 @@ export default function Console() {
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<View>('overview')
   const [openRun, setOpenRun] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
 
-  useEffect(() => {
-    runsApi.list().then(setRuns).catch((e) => setError(String(e?.message || e)))
-  }, [])
+  const refresh = () => runsApi.list().then(setRuns).catch((e) => setError(String(e?.message || e)))
+  useEffect(() => { refresh() }, [])
 
   if (!user) return null // App guards this route.
 
   const open = (id: string) => setOpenRun(id)
   const go = (v: View) => { setOpenRun(null); setView(v) }
+
+  // Trigger a real cross-org negotiation, then drop straight into its Theater to watch it stream.
+  const runLiveCase = async (caseName?: string) => {
+    if (starting) return
+    setStarting(true)
+    setError(null)
+    try {
+      const { run_id } = await runsApi.start(caseName)
+      setOpenRun(run_id)
+      refresh()
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    } finally {
+      setStarting(false)
+    }
+  }
 
   return (
     <div className="md:flex md:min-h-screen">
@@ -35,17 +51,59 @@ export default function Console() {
       <main className="min-w-0 flex-1 bg-bone">
         <div className="mx-auto max-w-4xl px-6 py-10 sm:px-10">
           {openRun ? (
-            <Theater runId={openRun} orgName={org?.name ?? 'Your organization'} onBack={() => setOpenRun(null)} />
+            <Theater runId={openRun} orgName={org?.name ?? 'Your organization'}
+              onBack={() => setOpenRun(null)} onComplete={refresh} />
           ) : view === 'overview' ? (
-            <Overview user={user} org={org} runs={runs} error={error} onOpen={open} onSeeAll={() => go('cases')} />
+            <Overview user={user} org={org} runs={runs} error={error} onOpen={open}
+              onSeeAll={() => go('cases')} onRunCase={runLiveCase} starting={starting} />
           ) : view === 'cases' ? (
-            <Cases runs={runs} error={error} onOpen={open} />
+            <Cases runs={runs} error={error} onOpen={open} onRunCase={runLiveCase} starting={starting} />
           ) : (
             <Settings user={user} org={org} />
           )}
         </div>
       </main>
     </div>
+  )
+}
+
+/** Demo scenarios the "Run a live case" control can launch (first = the headline). */
+const SCENARIOS: { id: string; label: string }[] = [
+  { id: 'humira_step_therapy_denied', label: 'Denial → appeal → overturn' },
+  { id: 'cauda_equina_urgent', label: 'Urgent — expedited 72h SLA' },
+  { id: 'mri_lumbar_dx_mismatch', label: 'Borderline → human review' },
+]
+
+/** Primary call-to-action: pick a scenario and launch a real provider↔payer negotiation that
+ * streams in live. The scenario select sits beside the button (defaults to the headline case). */
+function RunCaseButton({ onRunCase, starting, subtle }: { onRunCase: (caseName?: string) => void; starting: boolean; subtle?: boolean }) {
+  const [scenario, setScenario] = useState(SCENARIOS[0].id)
+  return (
+    <div className="inline-flex items-center gap-2">
+      <label className="sr-only" htmlFor="scenario">Scenario</label>
+      <select id="scenario" value={scenario} onChange={(e) => setScenario(e.target.value)} disabled={starting}
+        className="rounded-lg border border-line bg-paper px-2.5 py-2 font-mono text-[11px] text-ink-soft transition-colors hover:border-pine/40 disabled:opacity-60">
+        {SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+      </select>
+      <button onClick={() => onRunCase(scenario)} disabled={starting}
+        className={`group inline-flex items-center gap-2 rounded-lg px-4 py-2 text-[13px] font-medium transition-colors disabled:opacity-60 ${
+          subtle ? 'border border-pine/40 text-pine hover:bg-pine/[0.06]' : 'bg-coral text-bone hover:bg-coral/90'}`}>
+        {starting ? (
+          <><Spinner /> Starting a live case…</>
+        ) : (
+          <><span aria-hidden className="text-[15px] leading-none">▶</span> Run a live case</>
+        )}
+      </button>
+    </div>
+  )
+}
+
+function Spinner() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" className="animate-spin" aria-hidden>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4" fill="none" opacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.4" fill="none" strokeLinecap="round" />
+    </svg>
   )
 }
 
@@ -108,23 +166,31 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
 }
 
 /* ─── overview ────────────────────────────────────────────────────────────── */
-function Overview({ user, org, runs, error, onOpen, onSeeAll }: {
+function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, starting }: {
   user: { name: string; email: string }
   org: { name: string } | null
   runs: RunSummary[] | null
   error: string | null
   onOpen: (id: string) => void
   onSeeAll: () => void
+  onRunCase: (caseName?: string) => void
+  starting: boolean
 }) {
   const m = useMetrics(runs)
   return (
     <>
-      <Kicker>{org ? org.name : 'Signed in'}</Kicker>
-      <h1 className="mt-3 font-display text-4xl font-medium tracking-tight text-ink">
-        Hello, {user.name?.trim() || user.email.split('@')[0]}.
-      </h1>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Kicker>{org ? org.name : 'Signed in'}</Kicker>
+          <h1 className="mt-3 font-display text-4xl font-medium tracking-tight text-ink">
+            Hello, {user.name?.trim() || user.email.split('@')[0]}.
+          </h1>
+        </div>
+        <div className="pt-1"><RunCaseButton onRunCase={onRunCase} starting={starting} /></div>
+      </div>
 
-      <Quickstart hasRuns={!!runs && runs.length > 0} onOpenLatest={() => runs && runs[0] && onOpen(runs[0].id)} />
+      <Quickstart hasRuns={!!runs && runs.length > 0} onOpenLatest={() => runs && runs[0] && onOpen(runs[0].id)}
+        onRunCase={onRunCase} starting={starting} />
 
       {error && <Banner>{error}</Banner>}
 
@@ -146,7 +212,9 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll }: {
   )
 }
 
-function Quickstart({ hasRuns, onOpenLatest }: { hasRuns: boolean; onOpenLatest: () => void }) {
+function Quickstart({ hasRuns, onOpenLatest, onRunCase, starting }: {
+  hasRuns: boolean; onOpenLatest: () => void; onRunCase: (caseName?: string) => void; starting: boolean
+}) {
   const KEY = 'syntony.console.quickstart'
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(KEY) === '1')
   if (dismissed) return null
@@ -159,16 +227,19 @@ function Quickstart({ hasRuns, onOpenLatest }: { hasRuns: boolean; onOpenLatest:
       </div>
       <ol className="mt-4 grid gap-3 sm:grid-cols-3">
         <Step n="1" done title="Organization connected" body="Your side is on the mesh with an encrypted agent credential." />
-        <Step n="2" title={hasRuns ? 'Open a case' : 'Run your first case'}
-          body={hasRuns ? 'See a real provider↔payer negotiation, end to end.' : 'Launch run_all.py — it appears here, audited for you.'} />
+        <Step n="2" title="Run a live case"
+          body="Launch a real provider↔payer negotiation across two orgs and watch it stream in here." />
         <Step n="3" title="Privacy by design" body="You see every message, but only your own agents' private reasoning." />
       </ol>
-      {hasRuns && (
-        <button onClick={onOpenLatest}
-          className="mt-4 rounded-lg bg-pine px-4 py-2 text-[13px] font-medium text-bone transition-colors hover:bg-pine-deep">
-          Open latest case →
-        </button>
-      )}
+      <div className="mt-4 flex flex-wrap gap-3">
+        <RunCaseButton onRunCase={onRunCase} starting={starting} />
+        {hasRuns && (
+          <button onClick={onOpenLatest}
+            className="rounded-lg border border-pine/40 px-4 py-2 text-[13px] font-medium text-pine transition-colors hover:bg-pine/[0.06]">
+            Open latest case →
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -189,25 +260,37 @@ function Step({ n, title, body, done }: { n: string; title: string; body: string
 }
 
 /* ─── cases ───────────────────────────────────────────────────────────────── */
-function Cases({ runs, error, onOpen }: { runs: RunSummary[] | null; error: string | null; onOpen: (id: string) => void }) {
+function Cases({ runs, error, onOpen, onRunCase, starting }: {
+  runs: RunSummary[] | null; error: string | null; onOpen: (id: string) => void
+  onRunCase: (caseName?: string) => void; starting: boolean
+}) {
   return (
     <>
-      <Kicker>Audit</Kicker>
-      <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">Cases</h1>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Kicker>Audit</Kicker>
+          <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">Cases</h1>
+        </div>
+        <div className="pt-1"><RunCaseButton onRunCase={onRunCase} starting={starting} subtle /></div>
+      </div>
       <p className="mt-3 max-w-xl text-ink-soft">Every prior-authorization negotiation your organization took part in, scoped to what your side is allowed to see.</p>
       {error && <Banner>{error}</Banner>}
-      <div className="mt-8"><CaseList runs={runs} onOpen={onOpen} /></div>
+      <div className="mt-8"><CaseList runs={runs} onOpen={onOpen} onRunCase={onRunCase} starting={starting} /></div>
     </>
   )
 }
 
-function CaseList({ runs, onOpen }: { runs: RunSummary[] | null; onOpen: (id: string) => void }) {
+function CaseList({ runs, onOpen, onRunCase, starting }: {
+  runs: RunSummary[] | null; onOpen: (id: string) => void
+  onRunCase?: () => void; starting?: boolean
+}) {
   if (!runs) return <p className="font-mono text-[12px] text-ink-faint">Loading cases…</p>
   if (runs.length === 0)
     return (
       <div className="rounded-2xl border border-dashed border-line bg-sunk/40 p-8 text-center">
         <div className="font-display text-lg font-semibold">No cases yet</div>
-        <p className="mx-auto mt-2 max-w-sm text-[14px] text-ink-soft">Launch a negotiation with <code className="font-mono text-ink">run_all.py</code> and it will appear here, audited for your organization.</p>
+        <p className="mx-auto mt-2 max-w-sm text-[14px] text-ink-soft">Run a live provider↔payer negotiation — it streams in here, audited for your organization.</p>
+        {onRunCase && <div className="mt-5 flex justify-center"><RunCaseButton onRunCase={onRunCase} starting={!!starting} /></div>}
       </div>
     )
   return (
@@ -233,12 +316,54 @@ function CaseList({ runs, onOpen }: { runs: RunSummary[] | null; onOpen: (id: st
 }
 
 /* ─── theater (the wow) ───────────────────────────────────────────────────── */
-function Theater({ runId, orgName, onBack }: { runId: string; orgName: string; onBack: () => void }) {
+/** Pulsing "LIVE" pill shown while a negotiation is still streaming in. */
+function LivePill() {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-coral/40 bg-coral/[0.06] px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-coral">
+      <span className="relative flex h-2 w-2">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-coral opacity-75" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-coral" />
+      </span>
+      Live
+    </span>
+  )
+}
+
+function Theater({ runId, orgName, onBack, onComplete }: {
+  runId: string; orgName: string; onBack: () => void; onComplete?: () => void
+}) {
   const [detail, setDetail] = useState<RunDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Poll while the run is RUNNING so a live negotiation streams in turn by turn; stop once it
+  // finishes (and refresh the caller's list). A finished run opened from the list fetches once.
   useEffect(() => {
     setDetail(null)
-    runsApi.get(runId).then(setDetail).catch((e) => setError(String(e?.message || e)))
+    setError(null)
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let errs = 0
+    let done = false
+    const poll = async () => {
+      try {
+        const d = await runsApi.get(runId)
+        if (cancelled) return
+        setDetail(d)
+        errs = 0
+        if (d.run.status === 'running') {
+          timer = setTimeout(poll, 1500)
+        } else if (!done) {
+          done = true
+          onComplete?.()
+        }
+      } catch (e) {
+        if (cancelled) return
+        if (++errs <= 3) { timer = setTimeout(poll, 1500); return }  // tolerate a transient hiccup
+        setError(String((e as Error)?.message || e))
+      }
+    }
+    poll()
+    return () => { cancelled = true; if (timer) clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId])
 
   // group events by turn (room message + my private reasoning); derive which side is "me".
@@ -258,6 +383,7 @@ function Theater({ runId, orgName, onBack }: { runId: string; orgName: string; o
   if (!detail) return <div>{back}<p className="mt-6 font-mono text-[12px] text-ink-faint">Loading case…</p></div>
 
   const { run } = detail
+  const live = run.status === 'running'
   const overturned = detail.events.some((e) => e.payload.pa_event === 'DECISION_OVERTURNED')
 
   return (
@@ -268,10 +394,10 @@ function Theater({ runId, orgName, onBack }: { runId: string; orgName: string; o
           <Kicker>Case · prior authorization</Kicker>
           <h1 className="mt-2 font-display text-3xl font-medium tracking-tight text-ink">{caseTitle(run.case_name)}</h1>
         </div>
-        <DecisionBadge outcome={run.outcome} state={run.final_state} />
+        {live ? <LivePill /> : <DecisionBadge outcome={run.outcome} state={run.final_state} />}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-faint">
-        <span>{run.turns} turns</span><span>·</span>
+        <span>{turns.length} turns</span><span>·</span>
         <span>{fmtTime(run.started_at)}</span><span>·</span>
         <span>{run.events} messages</span><span>·</span>
         <span className="text-coral">{run.private_events} private to you</span>
@@ -281,6 +407,12 @@ function Theater({ runId, orgName, onBack }: { runId: string; orgName: string; o
       {overturned && <OverturnBanner />}
 
       <Lanes mySide={mySide} myOrg={orgName} />
+
+      {live && turns.length === 0 && (
+        <p className="mt-4 flex items-center gap-2 font-mono text-[12px] text-ink-faint">
+          <Spinner /> Negotiating across the mesh — turns will appear as they're posted…
+        </p>
+      )}
 
       <ol className="relative mt-2">
         {/* the spine */}

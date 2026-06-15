@@ -388,12 +388,14 @@ async def run_authbridge(
     narrate: Narrator | None = None,
     case_id: str | None = None,
     max_turns: int = 24,
+    on_turn: Callable[..., Any] | None = None,
 ):
     """Run one synthetic AuthBridge case end-to-end through the coordinator.
 
     ``tools=None`` drives the FSM without touching Band; pass real ``AgentTools`` /
     ``FakeAgentTools`` to emit through one transport, or ``tools_for`` to route per side
     (provider→clinic account, payer→payer account). ``narrate=llm_narrator()`` for a live run.
+    ``on_turn(envelope, state)`` streams each turn as it completes (see ``run_case``).
     Returns the ``CoordinatorResult`` (final state + full transcript + stop reason).
     """
     from engine.coordinator import run_case  # local import keeps engine deps lazy
@@ -411,4 +413,5 @@ async def run_authbridge(
         tools_for=tools_for,
         domain=st,
         max_turns=max_turns,
+        on_turn=on_turn,
     )

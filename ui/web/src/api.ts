@@ -127,7 +127,12 @@ export interface RunDetail {
   events: AuditEvent[]
 }
 
+export interface StartRunResult { run_id: string; case_name: string; status: string }
+
 export const runsApi = {
   list: () => request<RunSummary[]>('/api/runs', { auth: true }),
   get: (id: string) => request<RunDetail>(`/api/runs/${id}`, { auth: true }),
+  /** Kick off a live negotiation; returns the run id immediately (it streams in). */
+  start: (caseName?: string) =>
+    request<StartRunResult>('/api/runs/start', { method: 'POST', auth: true, body: caseName ? { case_name: caseName } : {} }),
 }

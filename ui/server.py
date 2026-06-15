@@ -23,9 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from band.client.rest import RestClient
 
@@ -34,7 +35,7 @@ from band.client.rest import RestClient
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from control.api import router as auth_router, runs_router
+from control.api import current_org_id, router as auth_router, runs_router
 
 load_dotenv()
 
@@ -100,6 +101,54 @@ def build_state(room_id: str) -> dict:
 @app.get("/api/state")
 def state(room: str = "") -> JSONResponse:
     return JSONResponse(build_state(room or DEFAULT_ROOM))
+
+
+# ---- live "Run a case" -----------------------------------------------------------
+# Trigger a real cross-org negotiation from the console and stream it into the org's audit
+# trail. This lives in the composition root (it wires the domain + Band + control plane),
+# not the control-plane API, which knows nothing about domains.
+_MAX_CONCURRENT_LIVE = 3
+_live_inflight: set[str] = set()
+
+
+class StartRunIn(BaseModel):
+    case_name: str | None = None
+
+
+@app.post("/api/runs/start", status_code=202)
+async def start_live_run(
+    body: StartRunIn | None = None,
+    org_id: str = Depends(current_org_id),
+) -> JSONResponse:
+    """Kick off a live negotiation in the background; return its run id at once so the
+    console can open the Case Theater and poll it as each turn lands."""
+    from control import seed
+    from control.db import session as open_session
+    import live_run
+
+    with open_session() as sess:
+        demo_orgs = set(seed.demo_side_orgs(sess).values())
+    if org_id not in demo_orgs:
+        raise HTTPException(403, "live demo runs are available to the demo organizations")
+    if len(_live_inflight) >= _MAX_CONCURRENT_LIVE:
+        raise HTTPException(429, "too many live runs in progress — try again shortly")
+
+    case_name = ((body.case_name if body else None) or live_run.DEFAULT_CASE).strip()
+    try:
+        run_id = live_run.open_live_run(case_name)
+    except KeyError as e:
+        raise HTTPException(400, str(e))
+
+    _live_inflight.add(run_id)
+
+    async def _go() -> None:
+        try:
+            await live_run.execute_live_run(run_id, case_name)
+        finally:
+            _live_inflight.discard(run_id)
+
+    asyncio.create_task(_go())
+    return JSONResponse({"run_id": run_id, "case_name": case_name, "status": "running"}, status_code=202)
 
 
 @app.websocket("/ws")

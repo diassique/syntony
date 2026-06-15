@@ -20,7 +20,7 @@ from sqlmodel import Session, select
 
 from . import security, service
 from .db import session as _open_session
-from .models import Event, Membership, Organization, Run, User
+from .models import Event, Membership, Organization, Run, RunStatus, User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 runs_router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -272,7 +272,9 @@ def get_run(run_id: str, org_id: str = Depends(current_org_id),
         select(Event).where(Event.run_id == run_id, Event.org_id == org_id)
         .order_by(Event.turn, Event.created_at)
     ).all()
-    if run is None or not events:
+    # A just-started live run has no events yet — return it (empty timeline) so the console can
+    # open the theater and poll as turns land. A finished run with no events for this org = 404.
+    if run is None or (not events and run.status != RunStatus.RUNNING.value):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found for this organization")
     return RunDetailOut(
         run=_run_out(run, events),

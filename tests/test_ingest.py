@@ -16,7 +16,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 os.environ.setdefault("SYNTONY_JWT_SECRET", "test-jwt-secret")
 os.environ.setdefault("SYNTONY_FERNET_KEY", Fernet.generate_key().decode())
 
-from control import ingest  # noqa: E402
+from control import ingest, service  # noqa: E402
 from control.models import Event, Organization, UsageRecord  # noqa: E402
 
 
@@ -104,3 +104,27 @@ def test_room_outcome_is_preserved_for_both(sess):
     for org in (clinic, payer):
         decided = [e for e in _events_for(sess, org.id) if e.payload.get("outcome") == "APPROVE"]
         assert len(decided) == 1
+
+
+def test_streaming_record_envelope_matches_batch_persist(sess):
+    """The live "Run a case" path records each envelope as it lands via record_envelope; it must
+    produce the same audit rows as the batch persist_result (so live and replayed runs agree)."""
+    clinic = Organization(name="Clinic", slug="clinic"); payer = Organization(name="Payer", slug="payer")
+    sess.add(clinic); sess.add(payer); sess.commit(); sess.refresh(clinic); sess.refresh(payer)
+    side_to_org = {"provider": clinic.id, "payer": payer.id}
+    org_ids = [clinic.id, payer.id]
+
+    # Stream turn-by-turn into a freshly created RUNNING run (the live path).
+    run = service.start_run(sess, org_id=clinic.id, case_name="streamed")
+    for env in _result().history:
+        ingest.record_envelope(sess, run=run, env=env, org_ids=org_ids,
+                               side_to_org=side_to_org, author_side=_author_side)
+
+    clinic_events = _events_for(sess, clinic.id)
+    payer_events = _events_for(sess, payer.id)
+    # same room/private distribution as the batch test
+    assert {e.payload["message"] for e in clinic_events if e.visibility == "room"} == {"Submitting the request.", "Approved."}
+    assert [e.payload["reasoning"] for e in clinic_events if e.visibility == "private_event"] == ["CLINIC_SECRET_STRATEGY"]
+    assert [e.payload["reasoning"] for e in payer_events if e.visibility == "private_event"] == ["PAYER_SECRET_STRATEGY"]
+    # moat holds under streaming too
+    assert all("PAYER_SECRET_STRATEGY" not in str(e.payload) for e in clinic_events)
