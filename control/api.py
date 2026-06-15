@@ -215,6 +215,7 @@ class RunOut(BaseModel):
     status: str
     final_state: str | None
     outcome: str | None  # final decision (APPROVE/DENY/…)
+    urgency: str | None  # standard (7d) | expedited (72h) — CMS-0057-F SLA tier
     turns: int
     room_id: str | None
     started_at: str
@@ -240,7 +241,7 @@ class RunDetailOut(BaseModel):
 def _run_out(run: Run, events: list[Event]) -> RunOut:
     return RunOut(
         id=run.id, case_name=run.case_name, status=run.status, final_state=run.final_state,
-        outcome=run.outcome, turns=run.turns, room_id=run.room_id,
+        outcome=run.outcome, urgency=run.urgency, turns=run.turns, room_id=run.room_id,
         started_at=run.started_at.isoformat(),
         ended_at=run.ended_at.isoformat() if run.ended_at else None,
         events=sum(1 for e in events if e.visibility == "room"),

@@ -157,6 +157,7 @@ class Run(SQLModel, table=True):
     status: str = Field(default=RunStatus.RUNNING.value)
     final_state: str | None = None
     outcome: str | None = None  # the case's final decision (APPROVE/DENY/…), for metrics
+    urgency: str | None = None  # "standard" (7d) | "expedited" (72h) — CMS-0057-F SLA
     turns: int = 0
     room_id: str | None = None
     started_at: datetime = Field(default_factory=_now)

@@ -104,6 +104,7 @@ export interface RunSummary {
   status: string
   final_state: string | null
   outcome: string | null
+  urgency: string | null
   turns: number
   room_id: string | null
   started_at: string
@@ -117,7 +118,7 @@ export interface AuditEvent {
   author: string
   kind: string
   visibility: 'room' | 'private_event'
-  payload: { message?: string; reasoning?: string; outcome?: string }
+  payload: { message?: string; reasoning?: string; outcome?: string; pa_event?: string; denial_reason?: string }
   created_at: string
 }
 

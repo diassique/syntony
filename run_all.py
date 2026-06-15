@@ -84,17 +84,23 @@ def _persist(case_name: str, room_id: str, res) -> None:
     try:
         from control import ingest, seed
         from control.db import session as open_session
+        from domains.authbridge.cases import ALL_CASES
+        from domains.authbridge.schema import Urgency
 
         def author_side(author: str) -> str:
             spec = ROLES.get(author)
             return spec.side.value if spec else "neutral"
+
+        # CMS-0057-F SLA tier from the case's urgency: URGENT → expedited (72h), else standard (7d).
+        req = ALL_CASES[case_name]()
+        urgency = "expedited" if req.urgency is Urgency.URGENT else "standard"
 
         with open_session() as sess:
             seed.seed_demo(sess)  # idempotent — ensures the Clinic/Payer orgs exist
             side_to_org = seed.demo_side_orgs(sess)
             run = ingest.persist_result(
                 sess, result=res, side_to_org=side_to_org, author_side=author_side,
-                case_name=case_name, room_id=room_id,
+                case_name=case_name, room_id=room_id, urgency=urgency,
             )
         print(f"audit: persisted run {run.id} (sign in as clinic@demo.syntony / payer@demo.syntony)")
     except Exception as e:  # noqa: BLE001 — persistence must never break the live demo

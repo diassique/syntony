@@ -51,9 +51,25 @@ def mri_lumbar_dx_mismatch() -> PriorAuthRequest:
     return req
 
 
+def humira_step_therapy_denied() -> PriorAuthRequest:
+    """Specialty drug (adalimumab / J0135) requested without a documented preferred-agent trial
+    → payer DENIES (STEP_THERAPY_NOT_MET). Appealable: Provider Appeals supplies the step-therapy
+    record and the denial is OVERTURNED on reconsideration (the demo's golden 80.7% scenario)."""
+    return PriorAuthRequest(
+        patient_ref="synthetic-patient-002",
+        procedure=Code(system="HCPCS", code="J0135", display="Adalimumab (Humira), 20 mg"),
+        diagnoses=[Code(system="ICD-10-CM", code="M06.9", display="Rheumatoid arthritis, unspecified")],
+        clinical_justification="Moderate-to-severe RA with inadequate disease control; biologic indicated.",
+        supporting_docs=["diagnosis_confirmation"],  # NB: no step_therapy_record → will be denied
+        ordering_provider=_PROVIDER,
+        urgency=Urgency.ROUTINE,
+    )
+
+
 ALL_CASES = {
     "mri_lumbar_complete": mri_lumbar_complete,
     "mri_lumbar_raw_intake": mri_lumbar_raw_intake,
     "mri_lumbar_missing_docs": mri_lumbar_missing_docs,
     "mri_lumbar_dx_mismatch": mri_lumbar_dx_mismatch,
+    "humira_step_therapy_denied": humira_step_therapy_denied,
 }

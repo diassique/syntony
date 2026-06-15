@@ -37,14 +37,14 @@ def test_debug_downshifts_to_haiku_and_drops_effort():
 
 
 def test_from_role_featherless_prefix_routes_to_featherless():
-    cfg = LLMConfig.from_role(ROLES["appeals.audit"])
+    cfg = LLMConfig.from_role(ROLES["provider.appeals"])
     assert cfg.base_url == FEATHERLESS_BASE_URL
     assert cfg.api_key_env == "FEATHERLESS_API_KEY"
 
 
 def test_debug_does_not_touch_open_model_role():
     # debug only downshifts anthropic/* — the open-model role stays put.
-    cfg = LLMConfig.from_role(ROLES["appeals.audit"], debug=True)
+    cfg = LLMConfig.from_role(ROLES["provider.appeals"], debug=True)
     assert cfg.model.startswith("featherless/")
 
 

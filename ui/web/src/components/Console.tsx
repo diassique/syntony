@@ -258,6 +258,7 @@ function Theater({ runId, orgName, onBack }: { runId: string; orgName: string; o
   if (!detail) return <div>{back}<p className="mt-6 font-mono text-[12px] text-ink-faint">Loading case…</p></div>
 
   const { run } = detail
+  const overturned = detail.events.some((e) => e.payload.pa_event === 'DECISION_OVERTURNED')
 
   return (
     <div>
@@ -276,6 +277,9 @@ function Theater({ runId, orgName, onBack }: { runId: string; orgName: string; o
         <span className="text-coral">{run.private_events} private to you</span>
       </div>
 
+      <SlaBanner run={run} />
+      {overturned && <OverturnBanner />}
+
       <Lanes mySide={mySide} myOrg={orgName} />
 
       <ol className="relative mt-2">
@@ -290,6 +294,57 @@ function Theater({ runId, orgName, onBack }: { runId: string; orgName: string; o
         <LockGlyph className="text-coral" /> private reasoning is scoped to its own organization — never the other side
       </p>
     </div>
+  )
+}
+
+/** Shown when a denial was appealed and overturned — the golden prior-auth outcome. */
+function OverturnBanner() {
+  return (
+    <div className="animate-rise mt-4 overflow-hidden rounded-xl border border-pine/30 bg-pine/[0.05] p-4">
+      <div className="flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-pine text-bone">↺</span>
+        <span className="font-display text-[15px] font-semibold text-pine">Denial overturned on appeal</span>
+      </div>
+      <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
+        Provider Appeals addressed the specific denial reason and the payer reconsidered.
+        <span className="font-semibold text-ink"> 80.7%</span> of appealed Medicare Advantage denials are
+        overturned — yet only <span className="font-semibold text-ink">11.5%</span> are ever appealed
+        <span className="font-mono text-[11px] text-ink-faint"> (KFF, 2024)</span>.
+      </p>
+    </div>
+  )
+}
+
+/** CMS-0057-F decision-time SLA: 72h expedited / 7 calendar days standard. */
+function SlaBanner({ run }: { run: RunSummary }) {
+  const expedited = run.urgency === 'expedited'
+  const hours = expedited ? 72 : 168
+  const deadline = new Date(new Date(run.started_at).getTime() + hours * 3_600_000)
+  const ended = run.ended_at ? new Date(run.ended_at) : null
+  const met = ended ? ended <= deadline : true
+  return (
+    <div className={`mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-4 py-2.5 ${
+      expedited ? 'border-coral/30 bg-coral/[0.04]' : 'border-line bg-sunk/40'}`}>
+      <ClockGlyph className={expedited ? 'text-coral' : 'text-ink-soft'} />
+      <span className="font-display text-[13px] font-semibold">{expedited ? 'Expedited' : 'Standard'}</span>
+      <span className="text-[13px] text-ink-soft">decision due within {expedited ? '72 hours' : '7 calendar days'}</span>
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">CMS-0057-F</span>
+      {ended && (
+        <span className={`ml-auto rounded-md px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] ${
+          met ? 'bg-pine/10 text-pine' : 'bg-coral/10 text-coral'}`}>
+          {met ? 'within SLA' : 'past SLA'}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function ClockGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" className={className} aria-hidden>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
   )
 }
 
@@ -320,10 +375,15 @@ function TurnRow({ t, mySide, myOrg, counterparty, index }: {
   const content = (
     <div style={{ animationDelay: `${index * 70}ms` }} className="animate-rise space-y-2">
       <div className={`rounded-xl border bg-paper px-4 py-3 ${isDecision ? 'border-pine/40 shadow-[0_10px_30px_-20px_rgba(11,94,79,0.7)]' : 'border-line'}`}>
-        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em]">
+        <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em]">
           <span className="text-ink-soft">{prettyAuthor(room.author)}</span>
-          <span className="text-ink-faint">{room.kind.toLowerCase().replace(/_/g, ' ')}</span>
+          <span className="rounded bg-sunk px-1.5 py-0.5 text-ink-faint">
+            {room.payload.pa_event ? prettyEvent(room.payload.pa_event) : room.kind.toLowerCase().replace(/_/g, ' ')}
+          </span>
           {room.payload.outcome && <OutcomeBadge outcome={room.payload.outcome} />}
+          {room.payload.denial_reason && (
+            <span className="rounded bg-coral/10 px-1.5 py-0.5 text-coral">{prettyReason(room.payload.denial_reason)}</span>
+          )}
         </div>
         <p className="mt-1.5 text-[14px] leading-relaxed text-ink">{room.payload.message || '—'}</p>
       </div>
@@ -509,6 +569,14 @@ function caseTitle(s: string): string {
 
 function prettyAuthor(a: string): string {
   return a.split('.').map((p) => p.replace(/\b\w/g, (c) => c.toUpperCase())).join(' · ')
+}
+
+function prettyEvent(e: string): string {
+  return e.toLowerCase().replace(/_/g, ' ')
+}
+
+function prettyReason(r: string): string {
+  return r.toLowerCase().replace(/_/g, ' ')
 }
 
 function sideOf(author: string): string {

@@ -58,6 +58,20 @@ def test_missing_docs_triggers_info_round_then_approves():
     assert _final(res).payload["outcome"] == "APPROVE"
 
 
+def test_step_therapy_denial_is_appealed_and_overturned():
+    res = _run("humira_step_therapy_denied")
+    assert res.final_state is State.DECIDE and res.stopped == "terminal"
+    pa = [e.payload.get("pa_event") for e in res.history]
+    # the golden loop: submitted → denied (step therapy) → appeal → overturned
+    assert pa == ["PA_INITIATED", "REQUEST_SUBMITTED", "DECISION_DENIED",
+                  "APPEAL_PACKET_ASSEMBLED", "DECISION_OVERTURNED"]
+    denied = next(e for e in res.history if e.payload.get("pa_event") == "DECISION_DENIED")
+    assert denied.payload["denial_reason"] == "STEP_THERAPY_NOT_MET"
+    appeal = next(e for e in res.history if e.payload.get("pa_event") == "APPEAL_PACKET_ASSEMBLED")
+    assert appeal.author == "provider.appeals"
+    assert _final(res).payload["outcome"] == "APPROVE" and _final(res).payload.get("overturned") is True
+
+
 def test_dx_mismatch_escalates_to_human_who_decides():
     res = _run("mri_lumbar_dx_mismatch")
     assert res.final_state is State.DECIDE

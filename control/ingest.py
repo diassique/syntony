@@ -34,6 +34,7 @@ def persist_result(
     case_name: str,
     room_id: str | None = None,
     model: str = "",
+    urgency: str | None = None,
 ) -> Any:
     """Persist ``result`` to the audit trail and return the created ``Run``.
 
@@ -46,13 +47,15 @@ def persist_result(
         raise ValueError("side_to_org is empty — nothing to attribute the audit to")
 
     run = service.start_run(sess, org_id=org_ids[0], case_name=case_name, room_id=room_id)
+    run.urgency = urgency
 
     for env in result.history:
         kind = env.kind.value if hasattr(env.kind, "value") else str(env.kind)
         message = (env.payload.get("message") or "").strip()
         room_payload: dict[str, Any] = {"message": message}
-        if env.payload.get("outcome"):
-            room_payload["outcome"] = env.payload["outcome"]
+        for k in ("outcome", "pa_event", "denial_reason"):  # carry PA audit semantics through
+            if env.payload.get(k):
+                room_payload[k] = env.payload[k]
 
         # room message → every participating org's audit
         for org_id in org_ids:

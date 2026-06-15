@@ -93,19 +93,22 @@ ROLES: dict[str, RoleSpec] = {
             "participant on escalation."
         ),
     ),
-    "appeals.audit": RoleSpec(
-        id="appeals.audit",
-        display_name="Appeals & Audit",
-        side=Side.NEUTRAL,
+    "provider.appeals": RoleSpec(
+        id="provider.appeals",
+        display_name="Provider Appeals",
+        side=Side.PROVIDER,   # appeals on the clinic's behalf → posts as clinic, audited to its org
         framework=Framework.LETTA,
-        model="featherless/deepseek-chat",   # open model via Featherless (slug to confirm)
-        acts_in=(State.RECRUIT, State.REVISE, State.INFO),
+        # Intended open-model home = Featherless (2nd partner prize). FEATHERLESS_API_KEY is not yet
+        # populated, so the narrator falls back gracefully; swap to a VERIFIED Featherless slug once
+        # the key is provided. Until then narration (when enabled) routes via the working AI/ML gateway.
+        model="featherless/deepseek-chat",   # UNVERIFIED slug — confirm before claiming live
+        acts_in=(State.REVISE, State.RECRUIT, State.INFO),
         system_prompt=(
             f"{_PROTOCOL_PRIMER}\n\n"
-            "ROLE: Appeals/Audit specialist, recruited dynamically when a case is denied. Assemble "
-            "an appeal packet from the case record and emit it as a PROPOSAL/INFO_RESPONSE. You also "
-            "write to the private audit channel (events), never leaking provider-side strategy to "
-            "the payer."
+            "ROLE: Provider Appeals specialist. When the payer DENIES with a specific reason, assemble "
+            "a targeted appeal that addresses exactly that reason (e.g. supply the step-therapy record "
+            "or conservative-care documentation) and resubmit for reconsideration. Be concise; cite the "
+            "denial reason you are curing. No raw PHI."
         ),
     ),
 }

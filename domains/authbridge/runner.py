@@ -37,10 +37,18 @@ from protocol import Envelope, Kind, State, Visibility
 from .policy import (
     POLICY_TABLE,
     Decision,
+    DenialReason,
     Outcome,
     completeness_issues,
     necessity_decision,
 )
+
+#: Denials a provider can cure by supplying documentation → route to appeal, don't terminate.
+_APPEALABLE = {
+    DenialReason.STEP_THERAPY_NOT_MET,
+    DenialReason.CONSERVATIVE_CARE_NOT_MET,
+    DenialReason.MISSING_DOCUMENTATION,
+}
 from .roles import ROLES
 from .schema import Code, OrderingProvider, PriorAuthRequest
 
@@ -79,6 +87,7 @@ class AuthBridgeState:
     decision: Decision | None = None
     pending_docs: tuple[str, ...] = ()
     info_satisfied: bool = False
+    appealed: bool = False  # set once Provider Appeals has cured a denial and resubmitted
 
 
 @dataclass(frozen=True)
@@ -91,6 +100,8 @@ class _Plan:
     facts: str
     mentions: tuple[str, ...]
     visibility: Visibility = Visibility.ROOM
+    pa_event: str = ""                 # PA audit-trail event type (see DOMAIN_PA.md)
+    denial_reason: str | None = None   # canonical DenialReason on a deny/info
     payload_extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -128,6 +139,7 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
             f"Opening a prior-authorization case for {st.req.procedure.display} "
             f"(patient {st.req.patient_ref}).",
             mentions=("provider.counsel",),
+            pa_event="PA_INITIATED",
         )
 
     if state is State.PROPOSE:
@@ -140,17 +152,22 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
             )
         else:
             facts = "Pre-submit completeness check passed; submitting the request to the payer."
-        return _Plan("provider.counsel", Kind.PROPOSAL, State.REVIEW, facts, mentions=("payer.reviewer",))
+        return _Plan("provider.counsel", Kind.PROPOSAL, State.REVIEW, facts,
+                     mentions=("payer.reviewer",), pa_event="REQUEST_SUBMITTED")
 
     if state is State.REVIEW:
         d = necessity_decision(st.req)
         st.decision = d
         reasons = "; ".join(d.reasons)
+        reason_code = d.reason_code.value if d.reason_code else None
         if d.outcome is Outcome.APPROVE:
+            overturned = st.appealed
+            verb = "APPROVE on reconsideration (overturned)" if overturned else "APPROVE"
             return _Plan(
                 "payer.reviewer", Kind.DECISION, State.DECIDE,
-                f"APPROVE — {reasons}", mentions=("provider.counsel",),
-                payload_extra={"outcome": "APPROVE"},
+                f"{verb} — {reasons}", mentions=("provider.counsel",),
+                pa_event="DECISION_OVERTURNED" if overturned else "DECISION_APPROVED",
+                payload_extra={"outcome": "APPROVE", **({"overturned": True} if overturned else {})},
             )
         if d.outcome is Outcome.REQUEST_INFO:
             st.pending_docs = tuple(_missing_docs(st.req))
@@ -159,6 +176,7 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
                 "payer.reviewer", Kind.INFO_REQUEST, State.INFO,
                 f"Recoverable gap — requesting information: {reasons}",
                 mentions=("provider.counsel",),
+                pa_event="PENDED_FOR_INFO", denial_reason=reason_code,
             )
         # DENY
         if d.escalate:
@@ -166,11 +184,39 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
                 "payer.reviewer", Kind.ESCALATION, State.ESCALATE,
                 f"Borderline denial — not auto-denying; escalating to the Medical Director: {reasons}",
                 mentions=("payer.medical_director",),
+                pa_event="ESCALATED_TO_MD", denial_reason=reason_code,
+            )
+        # Appealable denial → don't terminate; hand to Provider Appeals to cure & resubmit.
+        if not st.appealed and d.reason_code in _APPEALABLE:
+            return _Plan(
+                "payer.reviewer", Kind.DECISION, State.REVISE,
+                f"DENY — {reasons}", mentions=("provider.appeals",),
+                pa_event="DECISION_DENIED", denial_reason=reason_code,
+                payload_extra={"outcome": "DENY", "appealable": True},
             )
         return _Plan(
             "payer.reviewer", Kind.DECISION, State.DECIDE,
             f"DENY — {reasons}", mentions=("provider.counsel",),
+            pa_event="DECISION_DENIED", denial_reason=reason_code,
             payload_extra={"outcome": "DENY"},
+        )
+
+    if state is State.REVISE:
+        # Provider Appeals cures the specific denial reason and resubmits for reconsideration.
+        rule = POLICY_TABLE.get(st.req.procedure.code)
+        cured: list[str] = []
+        if rule:
+            for doc in (*rule.step_therapy_docs, *rule.required_docs):
+                if doc not in st.req.supporting_docs:
+                    st.req.supporting_docs = list(st.req.supporting_docs) + [doc]
+                    cured.append(doc)
+        st.appealed = True
+        code = st.decision.reason_code.value if (st.decision and st.decision.reason_code) else "the denial"
+        facts = (f"Appeal: addressing {code} — supplied {cured} and requesting reconsideration."
+                 if cured else f"Appeal: contesting {code}; requesting reconsideration.")
+        return _Plan(
+            "provider.appeals", Kind.PROPOSAL, State.REVIEW, facts,
+            mentions=("payer.reviewer",), pa_event="APPEAL_PACKET_ASSEMBLED",
         )
 
     if state is State.INFO:
@@ -182,19 +228,19 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
             return _Plan(
                 "provider.counsel", Kind.INFO_RESPONSE, State.REVIEW,
                 "Supplied the requested documentation: " + ", ".join(st.pending_docs) + ".",
-                mentions=("payer.reviewer",),
+                mentions=("payer.reviewer",), pa_event="DOCUMENTATION_COLLECTED",
             )
         return _Plan(
             "provider.counsel", Kind.INFO_RESPONSE, State.REVIEW,
             "No additional documentation is available for this request.",
-            mentions=("payer.reviewer",),
+            mentions=("payer.reviewer",), pa_event="DOCUMENTATION_COLLECTED",
         )
 
     if state is State.ESCALATE:
         return _Plan(
             "payer.reviewer", Kind.RECRUIT_REQUEST, State.ARBITER,
             "Recruiting the Payer Medical Director to adjudicate the borderline case.",
-            mentions=("payer.medical_director",),
+            mentions=("payer.medical_director",), pa_event="P2P_SCHEDULED",
         )
 
     if state is State.ARBITER:
@@ -205,6 +251,7 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
             "Medical Director review: on clinical discretion the borderline case is approved; "
             "the automated policy gap is documented for audit.",
             mentions=("provider.counsel",),
+            pa_event="DECISION_APPROVED",
             payload_extra={"outcome": "APPROVE", "note": "simulated Medical Director (HITL wiring pending)"},
         )
 
@@ -268,7 +315,6 @@ def llm_narrator(*, debug: bool = True) -> Narrator:
 
     def narrate(role_id: str, facts: str, kind: Kind, history: list[Envelope]) -> dict:
         spec = ROLES[role_id]
-        cfg = replace(LLMConfig.from_role(spec, debug=debug), response_format=AGENT_SCHEMA)
         user = (
             "You are taking your turn in a prior-authorization negotiation on Band.\n"
             f"AUTHORITATIVE FACTS (decided by policy — do NOT contradict, soften, or change any "
@@ -279,12 +325,17 @@ def llm_narrator(*, debug: bool = True) -> Narrator:
             "with exactly two string fields: `message` (1–2 sentences addressing the counterpart "
             "by role, no PHI) and `reasoning` (one brief sentence). Phrase the facts; never override them."
         )
-        kwargs = completion_kwargs(
-            cfg, [{"role": "system", "content": spec.system_prompt}, {"role": "user", "content": user}]
-        )
-        kwargs["max_tokens"] = 400
-        resp = _client(cfg).chat.completions.create(**kwargs)
-        return _parse_turn(resp.choices[0].message.content or "", fallback=facts)
+        try:
+            cfg = replace(LLMConfig.from_role(spec, debug=debug), response_format=AGENT_SCHEMA)
+            kwargs = completion_kwargs(
+                cfg, [{"role": "system", "content": spec.system_prompt}, {"role": "user", "content": user}]
+            )
+            kwargs["max_tokens"] = 400
+            resp = _client(cfg).chat.completions.create(**kwargs)
+            return _parse_turn(resp.choices[0].message.content or "", fallback=facts)
+        except Exception:  # noqa: BLE001 — a provider/key/slug failure must never break the run
+            # Graceful degradation: phrase deterministically (e.g. Featherless key not yet set).
+            return {"message": facts, "reasoning": facts}
 
     return narrate
 
@@ -311,6 +362,10 @@ def build_runner(*, narrate: Narrator | None = None):
             content = {"message": p.facts, "reasoning": p.facts}
 
         payload = {"message": content["message"], "reasoning": content["reasoning"], "facts": p.facts}
+        if p.pa_event:
+            payload["pa_event"] = p.pa_event
+        if p.denial_reason:
+            payload["denial_reason"] = p.denial_reason
         payload.update(p.payload_extra)
         env = Envelope(
             case_id=ctx.case_id,

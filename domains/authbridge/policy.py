@@ -27,12 +27,30 @@ class Outcome(str, Enum):
     REQUEST_INFO = "REQUEST_INFO"
 
 
+class DenialReason(str, Enum):
+    """Canonical, machine-typed denial/info reasons. CMS-0057-F (from 2026) requires payers to
+    state a *specific* reason — this enum is that contract, and it's what the Appeals agent acts
+    on. Mirrors the industry taxonomy (see DOMAIN_PA.md)."""
+
+    MISSING_DOCUMENTATION = "MISSING_DOCUMENTATION"
+    NOT_MEDICALLY_NECESSARY = "NOT_MEDICALLY_NECESSARY"
+    STEP_THERAPY_NOT_MET = "STEP_THERAPY_NOT_MET"
+    OUT_OF_NETWORK = "OUT_OF_NETWORK"
+    ELIGIBILITY_FAILED = "ELIGIBILITY_FAILED"
+    CODING_MISMATCH = "CODING_MISMATCH"
+    EXPERIMENTAL_INVESTIGATIONAL = "EXPERIMENTAL_INVESTIGATIONAL"
+    CONSERVATIVE_CARE_NOT_MET = "CONSERVATIVE_CARE_NOT_MET"
+    FREQUENCY_LIMIT_EXCEEDED = "FREQUENCY_LIMIT_EXCEEDED"
+    SITE_OF_CARE_NOT_APPROVED = "SITE_OF_CARE_NOT_APPROVED"
+
+
 @dataclass(frozen=True)
 class PolicyRule:
     """Medical-necessity rule for one procedure code (synthetic, illustrative)."""
 
     required_diagnosis_prefixes: tuple[str, ...] = ()       # e.g. ('M54',) low back pain
-    required_docs: tuple[str, ...] = ()                     # docs that must be attached
+    required_docs: tuple[str, ...] = ()                     # missing → REQUEST_INFO (recoverable)
+    step_therapy_docs: tuple[str, ...] = ()                 # missing → hard DENY (appealable)
     auto_approve: bool = False                              # trivially-approved low-cost items
 
 
@@ -47,6 +65,10 @@ POLICY_TABLE: dict[str, PolicyRule] = {
         required_docs=("conservative_therapy_notes",),
     ),
     "70551": PolicyRule(auto_approve=True),                 # MRI brain — auto-approve (synthetic)
+    "J0135": PolicyRule(                                    # adalimumab (Humira) — specialty drug
+        required_diagnosis_prefixes=("M05", "M06", "L40", "K50"),  # RA / psoriasis / Crohn
+        step_therapy_docs=("step_therapy_record",),         # must try preferred agents first
+    ),
 }
 
 
@@ -54,6 +76,8 @@ POLICY_TABLE: dict[str, PolicyRule] = {
 class Decision:
     outcome: Outcome
     reasons: list[str] = field(default_factory=list)
+    #: Machine-typed reason for a DENY/REQUEST_INFO (CMS-0057-F "specific reason"); drives Appeals.
+    reason_code: DenialReason | None = None
     #: True when the request technically fails but sits close enough to the line that a human
     #: Medical Director should make the call rather than an automatic DENY.
     escalate: bool = False
@@ -62,8 +86,8 @@ class Decision:
 def completeness_issues(req: PriorAuthRequest) -> list[str]:
     """Provider-side pre-submit checks. Empty list == ready to submit."""
     issues: list[str] = []
-    if req.procedure.system.upper() != "CPT" or not req.procedure.code.strip():
-        issues.append("Procedure must carry a valid CPT code.")
+    if req.procedure.system.upper() not in ("CPT", "HCPCS") or not req.procedure.code.strip():
+        issues.append("Procedure must carry a valid CPT/HCPCS code.")
     if not req.diagnoses:
         issues.append("At least one ICD-10 diagnosis is required.")
     if not req.ordering_provider.signed:
@@ -83,21 +107,28 @@ def necessity_decision(req: PriorAuthRequest) -> Decision:
 
     dx_codes = [d.code for d in req.diagnoses]
     dx_ok = any(c.startswith(p) for c in dx_codes for p in rule.required_diagnosis_prefixes)
-    missing_docs = [d for d in rule.required_docs if d not in req.supporting_docs]
 
-    reasons: list[str] = []
-    if not dx_ok:
-        reasons.append(
-            f"Diagnosis {dx_codes or '[]'} does not match medical-necessity criteria "
-            f"(expected one of {list(rule.required_diagnosis_prefixes)})."
-        )
-    if missing_docs:
-        reasons.append(f"Missing required documentation: {missing_docs}.")
-
-    if not reasons:
-        return Decision(Outcome.APPROVE, ["Meets medical-necessity criteria."])
-    # Diagnosis matches but docs are missing → recoverable, ask for info.
-    if dx_ok and missing_docs:
-        return Decision(Outcome.REQUEST_INFO, reasons)
     # Diagnosis mismatch → fails, but borderline cases go to a human, not an auto-deny.
-    return Decision(Outcome.DENY, reasons, escalate=True)
+    if not dx_ok:
+        reason = (f"Diagnosis {dx_codes or '[]'} does not match medical-necessity criteria "
+                  f"(expected one of {list(rule.required_diagnosis_prefixes)}).")
+        return Decision(Outcome.DENY, [reason], reason_code=DenialReason.NOT_MEDICALLY_NECESSARY, escalate=True)
+
+    # Step therapy not met → a hard DENY, but appealable (provider can supply the trial record).
+    missing_step = [d for d in rule.step_therapy_docs if d not in req.supporting_docs]
+    if missing_step:
+        return Decision(
+            Outcome.DENY,
+            [f"Step therapy not met: preferred-agent trial undocumented (missing {missing_step})."],
+            reason_code=DenialReason.STEP_THERAPY_NOT_MET,
+        )
+
+    # Diagnosis matches but supporting docs are missing → recoverable, ask for info.
+    missing_docs = [d for d in rule.required_docs if d not in req.supporting_docs]
+    if missing_docs:
+        code = (DenialReason.CONSERVATIVE_CARE_NOT_MET
+                if "conservative_therapy_notes" in missing_docs
+                else DenialReason.MISSING_DOCUMENTATION)
+        return Decision(Outcome.REQUEST_INFO, [f"Missing required documentation: {missing_docs}."], reason_code=code)
+
+    return Decision(Outcome.APPROVE, ["Meets medical-necessity criteria."])

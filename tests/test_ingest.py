@@ -20,10 +20,11 @@ from control import ingest  # noqa: E402
 from control.models import Event, Organization, UsageRecord  # noqa: E402
 
 
-def _env(turn, author, kind, message, reasoning, outcome=None):
+def _env(turn, author, kind, message, reasoning, outcome=None, pa_event=None, denial_reason=None):
     payload = {"message": message, "reasoning": reasoning}
-    if outcome:
-        payload["outcome"] = outcome
+    for k, v in (("outcome", outcome), ("pa_event", pa_event), ("denial_reason", denial_reason)):
+        if v:
+            payload[k] = v
     return SimpleNamespace(turn=turn, author=author, kind=SimpleNamespace(value=kind), payload=payload)
 
 
@@ -33,8 +34,10 @@ def _result():
         final_state=SimpleNamespace(value="DECIDE"),
         turns=2,
         history=[
-            _env(0, "provider.counsel", "PROPOSAL", "Submitting the request.", "CLINIC_SECRET_STRATEGY"),
-            _env(1, "payer.reviewer", "DECISION", "Approved.", "PAYER_SECRET_STRATEGY", outcome="APPROVE"),
+            _env(0, "provider.counsel", "PROPOSAL", "Submitting the request.", "CLINIC_SECRET_STRATEGY",
+                 pa_event="REQUEST_SUBMITTED"),
+            _env(1, "payer.reviewer", "DECISION", "Approved.", "PAYER_SECRET_STRATEGY", outcome="APPROVE",
+                 pa_event="DECISION_APPROVED"),
         ],
     )
 
@@ -61,11 +64,16 @@ def test_room_messages_go_to_both_orgs_private_reasoning_stays_with_author(sess)
 
     run = ingest.persist_result(
         sess, result=_result(), side_to_org={"provider": clinic.id, "payer": payer.id},
-        author_side=_author_side, case_name="demo_case", room_id="room-xyz",
+        author_side=_author_side, case_name="demo_case", room_id="room-xyz", urgency="expedited",
     )
 
     clinic_events = _events_for(sess, clinic.id)
     payer_events = _events_for(sess, payer.id)
+
+    # PA audit semantics + SLA tier carried through
+    assert run.urgency == "expedited"
+    room_pa_events = {e.payload.get("pa_event") for e in clinic_events if e.visibility == "room"}
+    assert room_pa_events == {"REQUEST_SUBMITTED", "DECISION_APPROVED"}
 
     # Both orgs see both room messages.
     for events in (clinic_events, payer_events):
