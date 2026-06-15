@@ -26,6 +26,7 @@ per role, and streaming.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
@@ -36,6 +37,11 @@ from typing import Any, Mapping
 # `base_url` — not used by any role today (base_url UNCONFIRMED; verify before enabling).
 AIML_BASE_URL = "https://api.aimlapi.com/v1"
 FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"  # example only — UNCONFIRMED, unused
+
+# Multimodal models, VERIFIED LIVE on our key (2026-06-15, see NOTES_AIML.md):
+VISION_MODEL = "gpt-5.5-2026-04-23"          # image→JSON; Claude is NOT vision-capable via this gateway
+EMBED_MODEL = "text-embedding-3-small"        # 1536-dim
+OCR_MODEL = "mistral/mistral-ocr-latest"      # /v1/ocr → pages[].markdown
 
 # Debug downshift target. Cheapest Claude tier on the gateway ($1/$5 per MTok). Haiku is
 # NOT reasoning-capable, so the debug path must NOT send `reasoning_effort` (AI/ML rejects
@@ -158,3 +164,78 @@ def completion_kwargs(
         kwargs["stream_options"] = {"include_usage": True}
     kwargs.update(cfg.extra_body)
     return kwargs
+
+
+# ---- multimodal capability layer (one AI/ML gateway, every modality) ------------
+# These wrap the AI/ML endpoints verified live in spikes/07 + NOTES_AIML.md. The pure
+# request-shaping helpers (``_vision_messages`` / ``_ocr_payload`` / ``loads_json``) are
+# split out so they're testable without a key or network.
+
+def loads_json(text: str) -> dict[str, Any]:
+    """Defensive JSON parse of a model reply: tolerate code fences / surrounding prose by
+    extracting the outermost ``{...}``. Returns ``{}`` if nothing parses."""
+    t = text or ""
+    i, j = t.find("{"), t.rfind("}")
+    if i < 0 or j <= i:
+        return {}
+    try:
+        return json.loads(t[i:j + 1])
+    except (json.JSONDecodeError, ValueError):
+        return {}
+
+
+def _vision_messages(instruction: str, image_data_uri: str) -> list[dict[str, Any]]:
+    """OpenAI multimodal message: an instruction + one image (base64 data URI or URL)."""
+    return [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": instruction},
+            {"type": "image_url", "image_url": {"url": image_data_uri}},
+        ],
+    }]
+
+
+def vision_extract(image_data_uri: str, *, schema: dict[str, Any], instruction: str,
+                   model: str = VISION_MODEL, max_tokens: int = 600,
+                   env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """Read an image with a vision model and return structured JSON (``response_format`` =
+    json_schema). The default model is vision-verified; Claude is not (see NOTES_AIML)."""
+    cfg = replace(LLMConfig(model=model, max_tokens=max_tokens), response_format=schema)
+    client = make_client(cfg, env=env)
+    resp = client.chat.completions.create(**completion_kwargs(cfg, _vision_messages(instruction, image_data_uri)))
+    return loads_json(resp.choices[0].message.content or "")
+
+
+def embed(texts: str | list[str], *, model: str = EMBED_MODEL,
+          env: Mapping[str, str] | None = None) -> list[list[float]]:
+    """Embed one or more strings via ``/v1/embeddings``. Returns a list of vectors."""
+    client = make_client(LLMConfig(model=model), env=env)
+    inputs = [texts] if isinstance(texts, str) else list(texts)
+    resp = client.embeddings.create(model=model, input=inputs)
+    return [d.embedding for d in resp.data]
+
+
+def _ocr_payload(url: str, model: str, kind: str) -> dict[str, Any]:
+    """Body for ``POST /v1/ocr`` — ``kind`` ∈ {document_url, image_url}; the key mirrors the type."""
+    return {"model": model, "document": {"type": kind, kind: url}}
+
+
+def ocr(url: str, *, model: str = OCR_MODEL, kind: str = "document_url",
+        env: Mapping[str, str] | None = None) -> str:
+    """OCR a document (PDF/image) at ``url`` → concatenated page markdown. URL input only
+    (the OCR schema has no base64 field; for image bytes use ``vision_extract`` instead)."""
+    env = os.environ if env is None else env
+    key = env.get("AIML_API_KEY")
+    if not key:
+        raise LLMKeyMissing("AIML_API_KEY is not set — needed for /v1/ocr.")
+    import httpx  # lazy: keep this module import-safe
+
+    resp = httpx.post(
+        f"{AIML_BASE_URL}/ocr",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json=_ocr_payload(url, model, kind),
+        timeout=120,
+    )
+    resp.raise_for_status()
+    pages = resp.json().get("pages", [])
+    return "\n\n".join(p.get("markdown", "") for p in pages).strip()

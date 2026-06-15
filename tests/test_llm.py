@@ -14,7 +14,10 @@ from engine.llm import (
     FEATHERLESS_BASE_URL,
     LLMConfig,
     LLMKeyMissing,
+    _ocr_payload,
+    _vision_messages,
     completion_kwargs,
+    loads_json,
     make_client,
 )
 
@@ -47,6 +50,25 @@ def test_debug_downshifts_appeals_to_haiku_too():
     # The 'cheap first' downshift applies uniformly to the claude-backed cast.
     cfg = LLMConfig.from_role(ROLES["provider.appeals"], debug=True)
     assert cfg.model == DEBUG_MODEL
+
+
+def test_loads_json_tolerates_fences_and_prose():
+    assert loads_json('```json\n{"cpt": "72148"}\n```') == {"cpt": "72148"}
+    assert loads_json('Here is the JSON: {"a": 1, "b": [2,3]} — done') == {"a": 1, "b": [2, 3]}
+    assert loads_json("no json here") == {}
+
+
+def test_vision_messages_carry_text_and_image():
+    msgs = _vision_messages("extract", "data:image/png;base64,XXXX")
+    content = msgs[0]["content"]
+    assert content[0] == {"type": "text", "text": "extract"}
+    assert content[1]["type"] == "image_url" and content[1]["image_url"]["url"].startswith("data:image/png")
+
+
+def test_ocr_payload_mirrors_type_key():
+    p = _ocr_payload("https://x/file.pdf", "mistral/mistral-ocr-latest", "document_url")
+    assert p == {"model": "mistral/mistral-ocr-latest",
+                 "document": {"type": "document_url", "document_url": "https://x/file.pdf"}}
 
 
 def test_from_role_rejects_human():
