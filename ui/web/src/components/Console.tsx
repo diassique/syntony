@@ -709,6 +709,10 @@ function TurnRow({ t, mySide, myOrg, counterparty, index }: {
           {room.payload.denial_reason && (
             <span className="rounded bg-coral/10 px-1.5 py-0.5 text-coral">{prettyReason(room.payload.denial_reason)}</span>
           )}
+          {room.payload.framework && (
+            <span title={room.payload.via ? `produced via ${room.payload.via}` : undefined}
+              className="ml-auto rounded bg-pine/[0.07] px-1.5 py-0.5 text-pine">{prettyFramework(room.payload.framework)}</span>
+          )}
         </div>
         <p className="mt-1.5 text-[14px] leading-relaxed text-ink">{room.payload.message || '—'}</p>
       </div>
@@ -1128,6 +1132,11 @@ function prettyEvent(e: string): string {
 
 function prettyReason(r: string): string {
   return r.toLowerCase().replace(/_/g, ' ')
+}
+
+function prettyFramework(f: string): string {
+  return { pydantic_ai: 'Pydantic AI', langgraph: 'LangGraph', human: 'Human', 'aiml-gateway': 'AI/ML', fallback: 'fallback' }[f]
+    || f.replace(/_/g, ' ')
 }
 
 function sideOf(author: string): string {

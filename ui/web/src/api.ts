@@ -118,7 +118,7 @@ export interface AuditEvent {
   author: string
   kind: string
   visibility: 'room' | 'private_event'
-  payload: { message?: string; reasoning?: string; outcome?: string; pa_event?: string; denial_reason?: string }
+  payload: { message?: string; reasoning?: string; outcome?: string; pa_event?: string; denial_reason?: string; framework?: string; via?: string }
   created_at: string
 }
 

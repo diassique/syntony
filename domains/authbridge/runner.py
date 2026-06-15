@@ -451,7 +451,8 @@ def llm_narrator(*, debug: bool = True) -> Narrator:
                 # A weak model can still bury/blob the message; run it through the same cleaner.
                 msg = _parse_turn(out.get("message", ""), fallback="")["message"]
                 if msg and not msg.startswith(("{", "[")):
-                    return {"message": msg, "reasoning": out.get("reasoning") or msg}
+                    # `via` records the path that actually produced this turn (provenance).
+                    return {"message": msg, "reasoning": out.get("reasoning") or msg, "via": spec.framework.value}
             except Exception:  # noqa: BLE001 — framework hiccup → fall back to the gateway
                 pass
         try:
@@ -461,10 +462,10 @@ def llm_narrator(*, debug: bool = True) -> Narrator:
             )
             kwargs["max_tokens"] = 400
             resp = _client(cfg).chat.completions.create(**kwargs)
-            return _parse_turn(resp.choices[0].message.content or "", fallback=facts)
+            return {**_parse_turn(resp.choices[0].message.content or "", fallback=facts), "via": "aiml-gateway"}
         except Exception:  # noqa: BLE001 — a provider/key/slug failure must never break the run
             # Graceful degradation: phrase deterministically (e.g. the LLM gateway is unavailable).
-            return {"message": facts, "reasoning": facts}
+            return {"message": facts, "reasoning": facts, "via": "fallback"}
 
     return narrate
 
@@ -491,6 +492,9 @@ def build_runner(*, narrate: Narrator | None = None):
             content = {"message": p.facts, "reasoning": p.facts}
 
         payload = {"message": content["message"], "reasoning": content["reasoning"], "facts": p.facts}
+        payload["framework"] = spec.framework.value          # the role's declared framework
+        if content.get("via"):
+            payload["via"] = content["via"]                  # the path that actually produced the turn
         if p.pa_event:
             payload["pa_event"] = p.pa_event
         if p.denial_reason:
