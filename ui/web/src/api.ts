@@ -171,6 +171,8 @@ export interface Insights {
   past_sla: number
   denial_reasons: { reason: string; count: number }[]
   agents: { author: string; runs: number }[]
+  frameworks: { via: string; count: number }[]
+  on_framework_rate: number
 }
 
 export interface AgentInfo {

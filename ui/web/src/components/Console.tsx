@@ -819,6 +819,19 @@ function InsightsView() {
             <Panel title="Agent participation">
               <BarList items={data.agents.map((a) => ({ label: prettyAuthor(a.author), value: a.runs }))} tone="pine" />
             </Panel>
+
+            <Panel title="Agent execution · provenance">
+              {data.frameworks.length ? (
+                <>
+                  <div className="mb-4 font-mono text-[11px] text-ink-soft">
+                    <span className="text-pine">{data.on_framework_rate}%</span> of turns ran on a real framework
+                  </div>
+                  <BarList items={data.frameworks.map((f) => ({ label: prettyFramework(f.via), value: f.count }))} tone="pine" />
+                </>
+              ) : (
+                <p className="text-[13px] text-ink-soft">No framework provenance recorded yet.</p>
+              )}
+            </Panel>
           </div>
         </>
       )}

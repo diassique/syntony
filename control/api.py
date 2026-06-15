@@ -298,12 +298,19 @@ def run_insights(org_id: str = Depends(current_org_id), sess: Session = Depends(
 
     reason_counts: dict[str, int] = {}
     agent_counts: dict[str, int] = {}
+    via_counts: dict[str, int] = {}  # provenance: which path produced each room turn
     for r in runs:
         evs = by_run.get(r.id, [])
         for rs in {ev.payload.get("denial_reason") for ev in evs if ev.payload.get("denial_reason")}:
             reason_counts[rs] = reason_counts.get(rs, 0) + 1
         for a in {ev.author for ev in evs}:
             agent_counts[a] = agent_counts.get(a, 0) + 1
+        for ev in evs:
+            via = ev.payload.get("via") if ev.visibility == "room" else None
+            if via:
+                via_counts[via] = via_counts.get(via, 0) + 1
+    on_framework = via_counts.get("pydantic_ai", 0) + via_counts.get("langgraph", 0)
+    via_total = sum(via_counts.values())
 
     return {
         "cases": cases,
@@ -324,6 +331,10 @@ def run_insights(org_id: str = Depends(current_org_id), sess: Session = Depends(
         "agents": sorted(
             [{"author": k, "runs": v} for k, v in agent_counts.items()], key=lambda x: -x["runs"]
         ),
+        "frameworks": sorted(
+            [{"via": k, "count": v} for k, v in via_counts.items()], key=lambda x: -x["count"]
+        ),
+        "on_framework_rate": round(on_framework / via_total * 100) if via_total else 0,
     }
 
 
