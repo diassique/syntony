@@ -172,6 +172,62 @@ async def start_live_run(
     return JSONResponse({"run_id": run_id, "case_name": case_name, "status": "running"}, status_code=202)
 
 
+class IntakeIn(BaseModel):
+    image: str | None = None         # data URI (png/jpg, base64) — vision path
+    document_url: str | None = None  # public PDF/image URL — OCR path
+    sample: bool = False             # use a built-in synthetic form (vision path)
+
+
+@app.post("/api/runs/intake", status_code=202)
+async def intake_run(body: IntakeIn | None = None, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    """The flagship AI/ML use-case: read an uploaded clinical document (vision or OCR), extract a
+    structured prior-auth request, and kick off the live negotiation from it."""
+    from control import seed
+    from control.db import session as open_session
+    from domains.authbridge import intake
+    import live_run
+
+    with open_session() as sess:
+        demo_orgs = set(seed.demo_side_orgs(sess).values())
+    if org_id not in demo_orgs:
+        raise HTTPException(403, "live demo runs are available to the demo organizations")
+    if len(_live_inflight) >= _MAX_CONCURRENT_LIVE:
+        raise HTTPException(429, "too many live runs in progress — try again shortly")
+
+    body = body or IntakeIn()
+    try:
+        if body.sample:
+            req = await asyncio.to_thread(intake.extract_request_from_image, intake.sample_document_data_uri())
+        elif body.image:
+            req = await asyncio.to_thread(intake.extract_request_from_image, body.image)
+        elif body.document_url:
+            req = await asyncio.to_thread(intake.extract_request_from_pdf, body.document_url)
+        else:
+            raise HTTPException(400, "provide an image, a document_url, or sample=true")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"document extraction failed: {type(e).__name__}: {str(e)[:120]}")
+
+    run_id = live_run.open_document_run(req)
+    _live_inflight.add(run_id)
+
+    async def _go() -> None:
+        try:
+            await live_run.execute_live_run(run_id, "document_intake", request=req)
+        finally:
+            _live_inflight.discard(run_id)
+
+    asyncio.create_task(_go())
+    extracted = {
+        "procedure": req.procedure.display,
+        "code": f"{req.procedure.system} {req.procedure.code}".strip(),
+        "diagnoses": [d.code for d in req.diagnoses],
+        "urgent": req.urgency.value == "urgent",
+    }
+    return JSONResponse({"run_id": run_id, "status": "running", "extracted": extracted}, status_code=202)
+
+
 class DecisionIn(BaseModel):
     outcome: str  # "APPROVE" | "DENY"
 

@@ -135,6 +135,10 @@ export const runsApi = {
   /** Kick off a live negotiation; returns the run id immediately (it streams in). */
   start: (caseName?: string) =>
     request<StartRunResult>('/api/runs/start', { method: 'POST', auth: true, body: caseName ? { case_name: caseName } : {} }),
+  /** Document intake (AI/ML vision/OCR): extract a request from an image/PDF and run it. */
+  intake: (body: { image?: string; document_url?: string; sample?: boolean }) =>
+    request<{ run_id: string; status: string; extracted: { procedure: string; code: string; diagnoses: string[]; urgent: boolean } }>(
+      '/api/runs/intake', { method: 'POST', auth: true, body }),
   /** Human-in-the-loop: the payer Medical Director resolves a paused borderline case. */
   decide: (id: string, outcome: 'APPROVE' | 'DENY') =>
     request<{ run_id: string; outcome: string; status: string }>(`/api/runs/${id}/decide`, { method: 'POST', auth: true, body: { outcome } }),

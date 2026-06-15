@@ -94,8 +94,27 @@ def _build_tools_for(case_id: str):
         return None, None
 
 
-async def execute_live_run(run_id: str, case_name: str, *, full: bool = False) -> None:
-    """Run the negotiation, streaming each turn into the audit trail, then finish the run."""
+def open_document_run(req, label: str = "document_intake") -> str:
+    """Create a RUNNING audit run for a request extracted from a document (not a named case)."""
+    urgency = "expedited" if req.urgency is Urgency.URGENT else "standard"
+    with open_session() as sess:
+        seed.seed_demo(sess)
+        side_to_org = seed.demo_side_orgs(sess)
+        org_ids = list(dict.fromkeys(side_to_org.values()))
+        if not org_ids:
+            raise RuntimeError("demo orgs not seeded — cannot attribute the run")
+        run = service.start_run(sess, org_id=org_ids[0], case_name=label)
+        run.urgency = urgency
+        sess.add(run)
+        sess.commit()
+        sess.refresh(run)
+        return run.id
+
+
+async def execute_live_run(run_id: str, case_name: str, *, request=None, full: bool = False) -> None:
+    """Run the negotiation, streaming each turn into the audit trail, then finish the run.
+
+    Pass ``request`` to run a document-extracted PriorAuthRequest instead of a named case."""
     with open_session() as sess:
         side_to_org = seed.demo_side_orgs(sess)
     org_ids = list(dict.fromkeys(side_to_org.values()))
@@ -112,7 +131,7 @@ async def execute_live_run(run_id: str, case_name: str, *, full: bool = False) -
     try:
         res = await run_authbridge(
             case_name, tools_for=tools_for, narrate=llm_narrator(debug=not full),
-            case_id=f"live-{case_name}", on_turn=on_turn,
+            case_id=f"live-{case_name}", on_turn=on_turn, request=request,
             pause_states={State.ARBITER},  # a borderline case pauses for the human Medical Director
         )
         paused = res.stopped == "paused"

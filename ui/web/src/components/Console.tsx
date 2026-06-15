@@ -46,6 +46,22 @@ export default function Console() {
     }
   }
 
+  // Document intake (AI/ML vision/OCR): extract a request from an uploaded image / sample, then run it.
+  const runIntake = async (payload: { image?: string; sample?: boolean }) => {
+    if (starting) return
+    setStarting(true)
+    setError(null)
+    try {
+      const { run_id } = await runsApi.intake(payload)
+      setOpenRun(run_id)
+      refresh()
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    } finally {
+      setStarting(false)
+    }
+  }
+
   return (
     <div className="md:flex md:min-h-screen">
       <Sidebar org={org} user={user} view={view} onNav={go} onSignOut={logout} />
@@ -56,9 +72,9 @@ export default function Console() {
               onBack={() => setOpenRun(null)} onComplete={refresh} />
           ) : view === 'overview' ? (
             <Overview user={user} org={org} runs={runs} error={error} onOpen={open}
-              onSeeAll={() => go('cases')} onRunCase={runLiveCase} starting={starting} />
+              onSeeAll={() => go('cases')} onRunCase={runLiveCase} onIntake={runIntake} starting={starting} />
           ) : view === 'cases' ? (
-            <Cases runs={runs} error={error} onOpen={open} onRunCase={runLiveCase} starting={starting} />
+            <Cases runs={runs} error={error} onOpen={open} onRunCase={runLiveCase} onIntake={runIntake} starting={starting} />
           ) : view === 'agents' ? (
             <AgentsView />
           ) : view === 'insights' ? (
@@ -103,6 +119,32 @@ function Spinner() {
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4" fill="none" opacity="0.25" />
       <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.4" fill="none" strokeLinecap="round" />
     </svg>
+  )
+}
+
+/** Document intake: upload a clinical document image (AI/ML vision reads it) or use a sample. */
+function IntakeButton({ onIntake, starting }: { onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean }) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    const reader = new FileReader()
+    reader.onload = () => onIntake({ image: String(reader.result) })
+    reader.readAsDataURL(f)
+    e.target.value = ''
+  }
+  return (
+    <div className="inline-flex items-center gap-2">
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+      <Button variant="secondary" disabled={starting} onClick={() => fileRef.current?.click()}
+        leadingIcon={<span aria-hidden className="text-[14px] leading-none">↥</span>}>
+        Intake from document
+      </Button>
+      <button onClick={() => onIntake({ sample: true })} disabled={starting}
+        className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft transition-colors hover:text-pine disabled:opacity-60">
+        use sample
+      </button>
+    </div>
   )
 }
 
@@ -170,7 +212,7 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
 }
 
 /* ─── overview ────────────────────────────────────────────────────────────── */
-function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, starting }: {
+function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, onIntake, starting }: {
   user: { name: string; email: string }
   org: { name: string } | null
   runs: RunSummary[] | null
@@ -178,6 +220,7 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, startin
   onOpen: (id: string) => void
   onSeeAll: () => void
   onRunCase: (caseName?: string) => void
+  onIntake: (p: { image?: string; sample?: boolean }) => void
   starting: boolean
 }) {
   const m = useMetrics(runs)
@@ -190,11 +233,14 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, startin
             Hello, {user.name?.trim() || user.email.split('@')[0]}.
           </h1>
         </div>
-        <div className="pt-1"><RunCaseButton onRunCase={onRunCase} starting={starting} /></div>
+        <div className="flex flex-col items-end gap-2 pt-1">
+          <RunCaseButton onRunCase={onRunCase} starting={starting} />
+          <IntakeButton onIntake={onIntake} starting={starting} />
+        </div>
       </div>
 
       <Quickstart hasRuns={!!runs && runs.length > 0} onOpenLatest={() => runs && runs[0] && onOpen(runs[0].id)}
-        onRunCase={onRunCase} starting={starting} />
+        onRunCase={onRunCase} onIntake={onIntake} starting={starting} />
 
       {error && <Banner>{error}</Banner>}
 
@@ -227,8 +273,9 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, startin
   )
 }
 
-function Quickstart({ hasRuns, onOpenLatest, onRunCase, starting }: {
-  hasRuns: boolean; onOpenLatest: () => void; onRunCase: (caseName?: string) => void; starting: boolean
+function Quickstart({ hasRuns, onOpenLatest, onRunCase, onIntake, starting }: {
+  hasRuns: boolean; onOpenLatest: () => void; onRunCase: (caseName?: string) => void
+  onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean
 }) {
   const KEY = 'syntony.console.quickstart'
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(KEY) === '1')
@@ -242,12 +289,13 @@ function Quickstart({ hasRuns, onOpenLatest, onRunCase, starting }: {
       </div>
       <ol className="mt-4 grid gap-3 sm:grid-cols-3">
         <Step n="1" done title="Organization connected" body="Your side is on the mesh with an encrypted agent credential." />
-        <Step n="2" title="Run a live case"
-          body="Launch a real provider↔payer negotiation across two orgs and watch it stream in here." />
+        <Step n="2" title="Run it or read a document"
+          body="Launch a live provider↔payer negotiation — or drop in a clinical document and let AI/ML read it." />
         <Step n="3" title="Privacy by design" body="You see every message, but only your own agents' private reasoning." />
       </ol>
-      <div className="mt-4 flex flex-wrap gap-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <RunCaseButton onRunCase={onRunCase} starting={starting} />
+        <IntakeButton onIntake={onIntake} starting={starting} />
         {hasRuns && (
           <button onClick={onOpenLatest}
             className="rounded-lg border border-pine/40 px-4 py-2 text-[13px] font-medium text-pine transition-colors hover:bg-pine/[0.06]">
@@ -275,9 +323,10 @@ function Step({ n, title, body, done }: { n: string; title: string; body: string
 }
 
 /* ─── cases ───────────────────────────────────────────────────────────────── */
-function Cases({ runs, error, onOpen, onRunCase, starting }: {
+function Cases({ runs, error, onOpen, onRunCase, onIntake, starting }: {
   runs: RunSummary[] | null; error: string | null; onOpen: (id: string) => void
-  onRunCase: (caseName?: string) => void; starting: boolean
+  onRunCase: (caseName?: string) => void
+  onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean
 }) {
   return (
     <>
@@ -286,7 +335,10 @@ function Cases({ runs, error, onOpen, onRunCase, starting }: {
           <Kicker>Audit</Kicker>
           <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">Cases</h1>
         </div>
-        <div className="pt-1"><RunCaseButton onRunCase={onRunCase} starting={starting} subtle /></div>
+        <div className="flex flex-col items-end gap-2 pt-1">
+          <RunCaseButton onRunCase={onRunCase} starting={starting} subtle />
+          <IntakeButton onIntake={onIntake} starting={starting} />
+        </div>
       </div>
       <p className="mt-3 max-w-xl text-ink-soft">Every prior-authorization negotiation your organization took part in, scoped to what your side is allowed to see.</p>
       {error && <Banner>{error}</Banner>}

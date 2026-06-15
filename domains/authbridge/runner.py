@@ -477,22 +477,25 @@ async def run_authbridge(
     max_turns: int = 24,
     on_turn: Callable[..., Any] | None = None,
     pause_states: Any = None,
+    request: PriorAuthRequest | None = None,
 ):
-    """Run one synthetic AuthBridge case end-to-end through the coordinator.
+    """Run one AuthBridge case end-to-end through the coordinator.
 
-    ``tools=None`` drives the FSM without touching Band; pass real ``AgentTools`` /
-    ``FakeAgentTools`` to emit through one transport, or ``tools_for`` to route per side
-    (provider→clinic account, payer→payer account). ``narrate=llm_narrator()`` for a live run.
-    ``on_turn(envelope, state)`` streams each turn as it completes (see ``run_case``).
-    Returns the ``CoordinatorResult`` (final state + full transcript + stop reason).
+    Drive a named synthetic case (``case_name`` ∈ ALL_CASES) or a **prebuilt ``request``**
+    (e.g. one extracted from an uploaded document — ``case_name`` is then just a label).
+    ``tools=None`` drives the FSM without touching Band; ``tools_for`` routes per side;
+    ``narrate=llm_narrator()`` for a live run; ``on_turn`` streams each turn (see ``run_case``).
     """
     from engine.coordinator import run_case  # local import keeps engine deps lazy
 
     from .cases import ALL_CASES
 
-    if case_name not in ALL_CASES:
-        raise KeyError(f"unknown case {case_name!r}; have {sorted(ALL_CASES)}")
-    st = AuthBridgeState(req=ALL_CASES[case_name]())
+    if request is not None:
+        st = AuthBridgeState(req=request)
+    else:
+        if case_name not in ALL_CASES:
+            raise KeyError(f"unknown case {case_name!r}; have {sorted(ALL_CASES)}")
+        st = AuthBridgeState(req=ALL_CASES[case_name]())
     return await run_case(
         case_id=case_id or f"authbridge-{case_name}",
         start=State.FRAME,

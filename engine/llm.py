@@ -206,6 +206,18 @@ def vision_extract(image_data_uri: str, *, schema: dict[str, Any], instruction: 
     return loads_json(resp.choices[0].message.content or "")
 
 
+def extract_from_text(text: str, *, schema: dict[str, Any], instruction: str,
+                      model: str = VISION_MODEL, max_tokens: int = 600,
+                      env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """Extract structured JSON from plain text (e.g. OCR'd document markdown) via a chat
+    model + json_schema. Sibling of ``vision_extract`` for the non-image path."""
+    cfg = replace(LLMConfig(model=model, max_tokens=max_tokens), response_format=schema)
+    client = make_client(cfg, env=env)
+    messages = [{"role": "user", "content": f"{instruction}\n\nDOCUMENT:\n{text[:8000]}"}]
+    resp = client.chat.completions.create(**completion_kwargs(cfg, messages))
+    return loads_json(resp.choices[0].message.content or "")
+
+
 def embed(texts: str | list[str], *, model: str = EMBED_MODEL,
           env: Mapping[str, str] | None = None) -> list[list[float]]:
     """Embed one or more strings via ``/v1/embeddings``. Returns a list of vectors."""
