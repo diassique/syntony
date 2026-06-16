@@ -285,6 +285,72 @@ def list_agent_configs(sess: Session, *, org_id: str) -> list:
     ).all())
 
 
+def upsert_policy_rule(sess: Session, *, procedure_code: str, required_diagnosis_prefixes: list,
+                       required_docs: list, step_therapy_docs: list, red_flag_prefixes: list,
+                       auto_approve: bool):
+    """Create or update a payer policy rule for a procedure code (edited from the UI)."""
+    from .models import PolicyRuleRow
+    code = procedure_code.strip().upper()
+    row = sess.exec(select(PolicyRuleRow).where(PolicyRuleRow.procedure_code == code)).first()
+    if row is None:
+        row = PolicyRuleRow(procedure_code=code)
+    row.required_diagnosis_prefixes = list(required_diagnosis_prefixes)
+    row.required_docs = list(required_docs)
+    row.step_therapy_docs = list(step_therapy_docs)
+    row.red_flag_prefixes = list(red_flag_prefixes)
+    row.auto_approve = bool(auto_approve)
+    sess.add(row)
+    sess.commit()
+    sess.refresh(row)
+    return row
+
+
+def delete_policy_rule(sess: Session, *, procedure_code: str) -> bool:
+    from .models import PolicyRuleRow
+    row = sess.exec(select(PolicyRuleRow).where(
+        PolicyRuleRow.procedure_code == procedure_code.strip().upper())).first()
+    if row is None:
+        return False
+    sess.delete(row)
+    sess.commit()
+    return True
+
+
+def list_policy_rules(sess: Session) -> list:
+    from .models import PolicyRuleRow
+    return list(sess.exec(select(PolicyRuleRow).order_by(PolicyRuleRow.procedure_code)).all())
+
+
+def upsert_criterion(sess: Session, *, slug: str, text: str):
+    """Create or update a medical-necessity criterion (edited from the UI)."""
+    from .models import Criterion
+    slug = slug.strip()
+    row = sess.exec(select(Criterion).where(Criterion.slug == slug)).first()
+    if row is None:
+        nxt = sess.exec(select(Criterion).order_by(Criterion.sort_order.desc())).first()
+        row = Criterion(slug=slug, sort_order=(nxt.sort_order + 1) if nxt else 0)
+    row.text = text.strip()
+    sess.add(row)
+    sess.commit()
+    sess.refresh(row)
+    return row
+
+
+def delete_criterion(sess: Session, *, slug: str) -> bool:
+    from .models import Criterion
+    row = sess.exec(select(Criterion).where(Criterion.slug == slug.strip())).first()
+    if row is None:
+        return False
+    sess.delete(row)
+    sess.commit()
+    return True
+
+
+def list_criteria(sess: Session) -> list:
+    from .models import Criterion
+    return list(sess.exec(select(Criterion).order_by(Criterion.sort_order)).all())
+
+
 def load_policy(sess: Session) -> dict:
     """The payer policy as the domain's ``{code: PolicyRule}`` map, read from the DB. Falls back
     to the built-in ``POLICY_TABLE`` when the table is empty (offline / unseeded)."""

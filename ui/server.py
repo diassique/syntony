@@ -603,6 +603,116 @@ async def pa_md_decide(run_id: str, body: MdDecideIn, org_id: str = Depends(curr
         raise HTTPException(409, str(e))
 
 
+# ---- configuration editors (payer edits its policy + clinical criteria) ----------
+# Reads are open to any authed org (transparency); writes are gated to the payer org. The
+# tables are global (one shared policy/criteria), so an edit takes effect for the next run.
+
+def _is_payer_org(sess: Any, org_id: str) -> bool:
+    from control import seed
+    return seed.demo_side_orgs(sess).get("payer") == org_id
+
+
+def _policy_rule_dict(r: Any) -> dict:
+    return {
+        "procedure_code": r.procedure_code,
+        "required_diagnosis_prefixes": r.required_diagnosis_prefixes,
+        "required_docs": r.required_docs,
+        "step_therapy_docs": r.step_therapy_docs,
+        "red_flag_prefixes": r.red_flag_prefixes,
+        "auto_approve": r.auto_approve,
+    }
+
+
+class PolicyRuleIn(BaseModel):
+    procedure_code: str
+    required_diagnosis_prefixes: list[str] = []
+    required_docs: list[str] = []
+    step_therapy_docs: list[str] = []
+    red_flag_prefixes: list[str] = []
+    auto_approve: bool = False
+
+
+class CriterionIn(BaseModel):
+    slug: str
+    text: str
+
+
+@app.get("/api/config/policy")
+def config_policy_list(org_id: str = Depends(current_org_id)) -> JSONResponse:
+    from control.db import session as open_session
+    from control import service
+    with open_session() as sess:
+        editable = _is_payer_org(sess, org_id)
+        rules = [_policy_rule_dict(r) for r in service.list_policy_rules(sess)]
+    return JSONResponse({"editable": editable, "rules": rules})
+
+
+@app.post("/api/config/policy")
+def config_policy_save(body: PolicyRuleIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    from control.db import session as open_session
+    from control import service
+    if not body.procedure_code.strip():
+        raise HTTPException(400, "procedure_code is required")
+    with open_session() as sess:
+        if not _is_payer_org(sess, org_id):
+            raise HTTPException(403, "only the payer may edit policy")
+        r = service.upsert_policy_rule(
+            sess, procedure_code=body.procedure_code,
+            required_diagnosis_prefixes=body.required_diagnosis_prefixes, required_docs=body.required_docs,
+            step_therapy_docs=body.step_therapy_docs, red_flag_prefixes=body.red_flag_prefixes,
+            auto_approve=body.auto_approve)
+        return JSONResponse(_policy_rule_dict(r))
+
+
+@app.delete("/api/config/policy/{code}")
+def config_policy_delete(code: str, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    from control.db import session as open_session
+    from control import service
+    with open_session() as sess:
+        if not _is_payer_org(sess, org_id):
+            raise HTTPException(403, "only the payer may edit policy")
+        ok = service.delete_policy_rule(sess, procedure_code=code)
+    if not ok:
+        raise HTTPException(404, "rule not found")
+    return JSONResponse({"deleted": code})
+
+
+@app.get("/api/config/criteria")
+def config_criteria_list(org_id: str = Depends(current_org_id)) -> JSONResponse:
+    from control.db import session as open_session
+    from control import service
+    with open_session() as sess:
+        editable = _is_payer_org(sess, org_id)
+        items = [{"slug": c.slug, "text": c.text} for c in service.list_criteria(sess)]
+    return JSONResponse({"editable": editable, "criteria": items})
+
+
+@app.post("/api/config/criteria")
+def config_criteria_save(body: CriterionIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    from control.db import session as open_session
+    from control import service
+    if not body.slug.strip() or not body.text.strip():
+        raise HTTPException(400, "slug and text are required")
+    with open_session() as sess:
+        if not _is_payer_org(sess, org_id):
+            raise HTTPException(403, "only the payer may edit criteria")
+        c = service.upsert_criterion(sess, slug=body.slug, text=body.text)
+        return JSONResponse({"slug": c.slug, "text": c.text})
+
+
+@app.delete("/api/config/criteria/{slug}")
+def config_criteria_delete(slug: str, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    from control.db import session as open_session
+    from control import service
+    with open_session() as sess:
+        if not _is_payer_org(sess, org_id):
+            raise HTTPException(403, "only the payer may edit criteria")
+        ok = service.delete_criterion(sess, slug=slug)
+    if not ok:
+        raise HTTPException(404, "criterion not found")
+    return JSONResponse({"deleted": slug})
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()

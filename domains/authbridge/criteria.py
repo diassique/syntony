@@ -63,7 +63,8 @@ def retrieve(query: str, k: int = 1, corpus: list[dict[str, str]] | None = None)
     from engine.llm import embed
 
     items = corpus if corpus else CRITERIA
-    key = tuple(c["id"] for c in items)
+    # key on (id, text) so an edited criterion text re-embeds instead of serving a stale vector.
+    key = tuple((c["id"], c["text"]) for c in items)
     if key not in _cache:
         _cache[key] = list(zip(items, embed([c["text"] for c in items])))
     qv = embed(query)[0]

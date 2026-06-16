@@ -7,6 +7,7 @@
 import {
   BookOpen, Users, Inbox, FilePlus2, FolderClosed, Boxes, BarChart3, Settings as SettingsIcon,
   Stethoscope, Gavel, RotateCcw, ShieldCheck, Lock, Clock, Play, FileSearch, ArrowRight, Award,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { Badge, Button } from './ui'
 
@@ -87,6 +88,7 @@ export default function Guide({ onGo }: { onGo?: Go }) {
           <NavRow icon={<FolderClosed size={14} strokeWidth={1.75} />} name="Cases" desc="Every negotiation (incl. Sample runs) + the two-lane Theater" />
           <NavRow icon={<Boxes size={14} strokeWidth={1.75} />} name="Agents" desc="The mesh roster — roles, frameworks, models" />
           <NavRow icon={<BarChart3 size={14} strokeWidth={1.75} />} name="Insights" desc="Outcomes, overturns, turnaround, SLA, denial mix" />
+          <NavRow icon={<SlidersHorizontal size={14} strokeWidth={1.75} />} name="Configuration" desc="Payer edits its policy rules + clinical criteria (applied to the next case)" />
           <NavRow icon={<SettingsIcon size={14} strokeWidth={1.75} />} name="Settings" desc="Org + account; compliance PDF / JSON audit export" />
         </div>
       </Section>

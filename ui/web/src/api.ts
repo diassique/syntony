@@ -317,6 +317,28 @@ export const patientsApi = {
   get: (id: string) => request<PatientChart>(`/api/patients/${id}`, { auth: true }),
 }
 
+// ---- configuration editors (payer edits its policy + clinical criteria) ----
+
+export interface PolicyRule {
+  procedure_code: string
+  required_diagnosis_prefixes: string[]
+  required_docs: string[]
+  step_therapy_docs: string[]
+  red_flag_prefixes: string[]
+  auto_approve: boolean
+}
+
+export interface CriterionItem { slug: string; text: string }
+
+export const configApi = {
+  policy: () => request<{ editable: boolean; rules: PolicyRule[] }>('/api/config/policy', { auth: true }),
+  savePolicy: (r: PolicyRule) => request<PolicyRule>('/api/config/policy', { method: 'POST', auth: true, body: r }),
+  deletePolicy: (code: string) => request<{ deleted: string }>(`/api/config/policy/${encodeURIComponent(code)}`, { method: 'DELETE', auth: true }),
+  criteria: () => request<{ editable: boolean; criteria: CriterionItem[] }>('/api/config/criteria', { auth: true }),
+  saveCriterion: (c: CriterionItem) => request<CriterionItem>('/api/config/criteria', { method: 'POST', auth: true, body: c }),
+  deleteCriterion: (slug: string) => request<{ deleted: string }>(`/api/config/criteria/${encodeURIComponent(slug)}`, { method: 'DELETE', auth: true }),
+}
+
 /** Human label for a workflow status. */
 export const PA_STATUS_LABEL: Record<string, string> = {
   awaiting_payer: 'Awaiting payer',

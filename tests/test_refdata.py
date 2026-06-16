@@ -56,6 +56,32 @@ def test_policy_loads_from_db_and_matches_the_constant(sess):
     assert policy["72148"].red_flag_prefixes == POLICY_TABLE["72148"].red_flag_prefixes
 
 
+def test_editing_policy_changes_the_loaded_decision_input(sess):
+    seed.seed_refdata(sess)
+    # add a brand-new procedure rule via the editor path
+    service.upsert_policy_rule(sess, procedure_code="71250",
+                               required_diagnosis_prefixes=["J18"], required_docs=["imaging_order"],
+                               step_therapy_docs=[], red_flag_prefixes=[], auto_approve=False)
+    policy = service.load_policy(sess)
+    assert "71250" in policy and policy["71250"].required_diagnosis_prefixes == ("J18",)
+    # update + delete
+    service.upsert_policy_rule(sess, procedure_code="71250", required_diagnosis_prefixes=["J18", "J44"],
+                               required_docs=[], step_therapy_docs=[], red_flag_prefixes=[], auto_approve=True)
+    assert service.load_policy(sess)["71250"].auto_approve is True
+    assert service.delete_policy_rule(sess, procedure_code="71250") is True
+    assert "71250" not in service.load_policy(sess)
+
+
+def test_editing_criteria_updates_the_db_corpus(sess):
+    seed.seed_refdata(sess)
+    service.upsert_criterion(sess, slug="ct_chest", text="CT chest is necessary for ...")
+    corpus = {c["id"]: c["text"] for c in service.criteria_corpus(sess)}
+    assert corpus["ct_chest"].startswith("CT chest")
+    service.upsert_criterion(sess, slug="ct_chest", text="edited text")  # update in place
+    assert {c["id"]: c["text"] for c in service.criteria_corpus(sess)}["ct_chest"] == "edited text"
+    assert service.delete_criterion(sess, slug="ct_chest") is True
+
+
 def test_catalogs_served_from_db_match_the_seed(sess):
     seed.seed_refdata(sess)
     tokens = {d.token for d in service.list_doc_types(sess)}

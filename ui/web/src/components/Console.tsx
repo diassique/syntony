@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard, FolderClosed, Boxes, BarChart3, Settings as SettingsIcon,
   Play, Upload, Copy, Check, ExternalLink, FileText, Braces,
-  Lock, Clock, RotateCcw, Gavel, ChevronRight, Loader2, Inbox, FilePlus2, Users, BookOpen,
+  Lock, Clock, RotateCcw, Gavel, ChevronRight, Loader2, Inbox, FilePlus2, Users, BookOpen, SlidersHorizontal,
 } from 'lucide-react'
 import { runsApi, agentsApi, type AgentInfo, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
@@ -18,8 +18,9 @@ import { Wordmark } from './Logo'
 import { Badge, Button, Select } from './ui'
 import { PaSubmit, PaWorklist, PaCase, PatientsView } from './PriorAuth'
 import Guide from './Guide'
+import Config from './Config'
 
-type View = 'overview' | 'guide' | 'patients' | 'prior_auth' | 'submit' | 'cases' | 'agents' | 'insights' | 'settings'
+type View = 'overview' | 'guide' | 'patients' | 'prior_auth' | 'submit' | 'cases' | 'agents' | 'insights' | 'config' | 'settings'
 
 export default function Console() {
   const { user, org, logout } = useAuth()
@@ -92,6 +93,8 @@ export default function Console() {
             <PatientsView onOpenCase={openPaCase} onNewRequest={newRequestFor} />
           ) : view === 'guide' ? (
             <Guide onGo={(v) => go(v as View)} />
+          ) : view === 'config' ? (
+            <Config />
           ) : view === 'overview' ? (
             <Overview user={user} org={org} runs={runs} error={error} onOpen={open}
               onSeeAll={() => go('cases')} onRunCase={runLiveCase} onIntake={runIntake} starting={starting} />
@@ -177,6 +180,7 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
     { id: 'cases', label: 'Cases', icon: FolderClosed },
     { id: 'agents', label: 'Agents', icon: Boxes },
     { id: 'insights', label: 'Insights', icon: BarChart3 },
+    { id: 'config', label: 'Configuration', icon: SlidersHorizontal },
     { id: 'guide', label: 'Guide', icon: BookOpen },
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ]
