@@ -189,3 +189,113 @@ export const agentsApi = {
   /** The agent roster powering the mesh (roles, frameworks, models). */
   list: () => request<{ agents: AgentInfo[] }>('/api/agents', { auth: true }),
 }
+
+// ---- interactive prior-auth workflow (the real two-sided, form-driven flow) ----
+
+export interface PrecheckReport {
+  ready: boolean
+  blocking_issues: string[]
+  completeness_issues: string[]
+  coding_issues: string[]
+  policy_on_file: boolean
+  missing_required_docs: string[]
+  missing_step_therapy_docs: string[]
+  advisories: string[]
+}
+
+export interface PaOptions {
+  supporting_doc_types: { id: string; label: string }[]
+  known_procedures: { system: string; code: string; display: string }[]
+  denial_reasons: string[]
+}
+
+export interface PaTimelineItem {
+  turn: number
+  author: string
+  kind: string
+  visibility: 'room' | 'private_event'
+  message: string
+  reasoning: string
+  pa_event?: string | null
+  outcome?: string | null
+  denial_reason?: string | null
+  auth_number?: string | null
+  overturned?: boolean | null
+  hitl?: boolean | null
+  via?: string | null
+  framework?: string | null
+}
+
+export interface PaSummary {
+  run_id: string
+  status: string
+  mode: string
+  side: 'provider' | 'payer' | null
+  case: string
+  patient_ref: string
+  urgency: string | null
+  outcome: string | null
+  turns: number
+  started_at: string | null
+  sla_deadline: string | null
+  actions: string[]
+}
+
+export interface PaRecommendation {
+  outcome?: string
+  reason_code?: string | null
+  reasons?: string[]
+  escalate?: boolean
+  suggested_action?: string
+}
+
+export interface PaDetail extends PaSummary {
+  fsm_state: string | null
+  request: PaRequestShape
+  auth_number: string
+  timeline: PaTimelineItem[]
+  recommendation?: PaRecommendation
+}
+
+export interface PaRequestShape {
+  patient_ref: string
+  procedure: { system: string; code: string; display: string }
+  diagnoses: { system: string; code: string; display: string }[]
+  clinical_justification: string
+  supporting_docs: string[]
+  ordering_provider: { npi: string; name: string; signed: boolean }
+  urgency: string
+  member_id?: string
+  health_plan?: string
+  units?: number
+  place_of_service?: string
+}
+
+export type PaForm = Record<string, unknown>
+
+export const paApi = {
+  options: () => request<PaOptions>('/api/pa/options', { auth: true }),
+  precheck: (form: PaForm) => request<PrecheckReport>('/api/pa/precheck', { method: 'POST', auth: true, body: { form } }),
+  submit: (form: PaForm) => request<{ run_id: string; status: string }>('/api/pa/submit', { method: 'POST', auth: true, body: { form } }),
+  worklist: () => request<{ items: PaSummary[] }>('/api/pa/worklist', { auth: true }),
+  get: (id: string) => request<PaDetail>(`/api/pa/${id}`, { auth: true }),
+  review: (id: string) => request<{ status: string }>(`/api/pa/${id}/review`, { method: 'POST', auth: true }),
+  decide: (id: string, body: { action: string; reason_code?: string | null; note?: string }) =>
+    request<{ status: string }>(`/api/pa/${id}/decide`, { method: 'POST', auth: true, body }),
+  respond: (id: string, docs: string[]) => request<{ status: string }>(`/api/pa/${id}/respond`, { method: 'POST', auth: true, body: { docs } }),
+  appeal: (id: string, docs: string[]) => request<{ status: string }>(`/api/pa/${id}/appeal`, { method: 'POST', auth: true, body: { docs } }),
+  accept: (id: string) => request<{ status: string }>(`/api/pa/${id}/accept`, { method: 'POST', auth: true }),
+  mdDecide: (id: string, outcome: 'APPROVE' | 'DENY', note = '') =>
+    request<{ status: string }>(`/api/pa/${id}/md-decide`, { method: 'POST', auth: true, body: { outcome, note } }),
+}
+
+/** Human label for a workflow status. */
+export const PA_STATUS_LABEL: Record<string, string> = {
+  awaiting_payer: 'Awaiting payer',
+  awaiting_payer_decision: 'Awaiting decision',
+  awaiting_provider: 'Action needed',
+  awaiting_human: 'Medical Director',
+  succeeded: 'Decided',
+  failed: 'Failed',
+  running: 'Running',
+}

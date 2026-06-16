@@ -46,7 +46,9 @@ def record_envelope(
     kind = env.kind.value if hasattr(env.kind, "value") else str(env.kind)
     message = (env.payload.get("message") or "").strip()
     room_payload: dict[str, Any] = {"message": message}
-    for k in ("outcome", "pa_event", "denial_reason", "framework", "via"):  # carry PA audit + provenance
+    # carry PA audit + provenance + determination details onto the room copy
+    for k in ("outcome", "pa_event", "denial_reason", "framework", "via",
+              "auth_number", "overturned", "hitl", "appealable"):
         if env.payload.get(k):
             room_payload[k] = env.payload[k]
 

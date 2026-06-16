@@ -89,6 +89,7 @@ async def run_case(
     max_turns: int = 24,
     on_turn: Callable[[Envelope, State], Any] | None = None,
     pause_states: frozenset[State] | set[State] | None = None,
+    history: list[Envelope] | None = None,
 ) -> CoordinatorResult:
     """Drive one case from ``start`` until terminal / stuck / ``max_turns``.
 
@@ -109,7 +110,9 @@ async def run_case(
     ``IllegalTransition`` if the runner ever proposes a move the FSM forbids, and
     ``ValueError`` if a move's envelope is misrouted (wrong ``case_id``).
     """
-    ctx = CaseContext(case_id=case_id, state=start, turn=0, history=[], domain=domain)
+    # ``history`` seeds prior transcript for narration context when resuming a parked case; it is
+    # NOT re-emitted. ``turn`` still starts at 0 — callers offset audit turns across segments.
+    ctx = CaseContext(case_id=case_id, state=start, turn=0, history=list(history or []), domain=domain)
 
     while True:
         if ctx.state in TERMINAL:

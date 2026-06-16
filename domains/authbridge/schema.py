@@ -43,3 +43,11 @@ class PriorAuthRequest(BaseModel):
     )
     ordering_provider: OrderingProvider
     urgency: Urgency = Urgency.ROUTINE
+
+    # --- payer/membership context (FHIR/X12-flavored, optional; synthetic only) ---
+    # Carried for realism on the request form and the determination notice; policy keys off the
+    # procedure code + diagnoses + docs, so these never affect the medical-necessity decision.
+    member_id: str = Field("", description="Synthetic subscriber/member id (X12 278 NM109/MI).")
+    health_plan: str = Field("", description="Plan name / line of business (e.g. 'Medicare Advantage').")
+    units: int = Field(1, ge=1, description="Requested units/quantity (X12 HSD).")
+    place_of_service: str = Field("", description="POS code, e.g. '11' office, '22' outpatient hospital.")

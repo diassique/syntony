@@ -50,9 +50,18 @@ class CredentialKind(str, Enum):
 
 class RunStatus(str, Enum):
     RUNNING = "running"
-    AWAITING_HUMAN = "awaiting_human"  # paused at a borderline case for a human (HITL) decision
+    AWAITING_HUMAN = "awaiting_human"  # paused at a borderline case for the human Medical Director
+    # interactive two-sided workflow: the run is parked waiting for one side's human to act
+    AWAITING_PAYER = "awaiting_payer"            # submitted; in the payer worklist to be opened
+    AWAITING_PAYER_DECISION = "awaiting_payer_decision"  # UM review done; payer must commit a verdict
+    AWAITING_PROVIDER = "awaiting_provider"      # pended/denied; provider must respond or appeal
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class RunMode(str, Enum):
+    AUTO = "auto"               # the "Sample run" — the runner auto-drives both sides end-to-end
+    INTERACTIVE = "interactive"  # the real flow — humans on each side act through the workflow API
 
 
 class User(SQLModel, table=True):
@@ -156,11 +165,15 @@ class Run(SQLModel, table=True):
     project_id: str | None = Field(default=None, foreign_key="projects.id", index=True)
     case_name: str = ""
     status: str = Field(default=RunStatus.RUNNING.value)
+    mode: str = Field(default=RunMode.AUTO.value)  # "auto" (Sample run) | "interactive" (real flow)
     final_state: str | None = None
     outcome: str | None = None  # the case's final decision (APPROVE/DENY/…), for metrics
     urgency: str | None = None  # "standard" (7d) | "expedited" (72h) — CMS-0057-F SLA
     turns: int = 0
     room_id: str | None = None
+    #: Resumable working state of an interactive run (serialized AuthBridgeState + FSM state).
+    #: Empty for autoplay runs. The interactive workflow reads it to resume the next segment.
+    workflow: dict = Field(default_factory=dict, sa_type=JSON)
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None
 

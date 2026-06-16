@@ -252,6 +252,264 @@ async def decide_run(run_id: str, body: DecisionIn, org_id: str = Depends(curren
     return JSONResponse({"run_id": run_id, "outcome": outcome, "status": "succeeded"})
 
 
+# ---- interactive PA workflow (the real two-sided, form-driven flow) --------------
+# These are org-scoped via the auth dependency (NOT demo-gated). A provider org submits a
+# request; the payer org acts from its worklist; each side sees only its own audit view.
+
+def _run_sides(run: Any) -> dict:
+    return (run.workflow or {}).get("side_to_org", {})
+
+
+def _side_of(run: Any, org_id: str) -> str | None:
+    for side, oid in _run_sides(run).items():
+        if oid == org_id:
+            return side
+    return None
+
+
+def _pa_actions(run: Any, side: str | None) -> list[str]:
+    """Which actions this side may take now (drives the console's buttons)."""
+    s = run.status
+    fsm = (run.workflow or {}).get("fsm_state")
+    if side == "payer":
+        if s == "awaiting_payer":
+            return ["review"]
+        if s == "awaiting_payer_decision":
+            return ["decide"]
+        if s == "awaiting_human":
+            return ["md_decide"]
+    if side == "provider" and s == "awaiting_provider":
+        return ["respond"] if fsm == "INFO" else ["appeal", "accept"]
+    return []
+
+
+def _pa_summary(run: Any, side: str | None) -> dict:
+    from domains.authbridge import workflow as wf
+    req = (run.workflow or {}).get("state", {}).get("req", {})
+    proc = req.get("procedure", {})
+    return {
+        "run_id": run.id,
+        "status": run.status,
+        "mode": run.mode,
+        "side": side,
+        "case": f"{proc.get('system', '')} {proc.get('code', '')} — {proc.get('display', '')}".strip(" —"),
+        "patient_ref": req.get("patient_ref", ""),
+        "urgency": run.urgency,
+        "outcome": run.outcome,
+        "turns": run.turns,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "sla_deadline": wf.sla_deadline(run.started_at, run.urgency).isoformat() if run.started_at else None,
+        "actions": _pa_actions(run, side),
+    }
+
+
+def _pa_detail(sess: Any, run: Any, org_id: str, side: str | None) -> dict:
+    from sqlmodel import select
+    from control.models import Event
+    state = (run.workflow or {}).get("state", {})
+    rows = sess.exec(
+        select(Event).where(Event.run_id == run.id, Event.org_id == org_id)
+        .order_by(Event.turn, Event.created_at)
+    ).all()
+    timeline = [{
+        "turn": e.turn, "author": e.author, "kind": e.kind, "visibility": e.visibility,
+        "message": (e.payload or {}).get("message", ""),
+        "reasoning": (e.payload or {}).get("reasoning", ""),
+        "pa_event": (e.payload or {}).get("pa_event"),
+        "outcome": (e.payload or {}).get("outcome"),
+        "denial_reason": (e.payload or {}).get("denial_reason"),
+        "auth_number": (e.payload or {}).get("auth_number"),
+        "overturned": (e.payload or {}).get("overturned"),
+        "hitl": (e.payload or {}).get("hitl"),
+        "via": (e.payload or {}).get("via"),
+        "framework": (e.payload or {}).get("framework"),
+    } for e in rows]
+    detail = {
+        **_pa_summary(run, side),
+        "fsm_state": (run.workflow or {}).get("fsm_state"),
+        "request": state.get("req", {}),
+        "auth_number": state.get("auth_number", ""),
+        "timeline": timeline,
+    }
+    if side == "payer":  # the payer's internal UM recommendation is payer-only
+        detail["recommendation"] = state.get("recommendation", {})
+    return detail
+
+
+class PrecheckIn(BaseModel):
+    form: dict
+
+
+@app.post("/api/pa/options")
+@app.get("/api/pa/options")
+def pa_options(_user=Depends(current_user)) -> JSONResponse:
+    """Form catalogs: supporting-doc types, known procedures, denial-reason enum."""
+    from domains.authbridge import workflow as wf
+    return JSONResponse(wf.doc_options())
+
+
+@app.post("/api/pa/precheck")
+def pa_precheck(body: PrecheckIn, _user=Depends(current_user)) -> JSONResponse:
+    """Provider Counsel's live pre-submit check — flags gaps before the request is filed."""
+    from domains.authbridge import workflow as wf
+    try:
+        req = wf.build_request(body.form)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse(wf.precheck(req))
+
+
+class SubmitIn(BaseModel):
+    form: dict
+
+
+@app.post("/api/pa/submit", status_code=202)
+async def pa_submit(body: SubmitIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    """Provider files the PA request → opens the interactive run and parks it in the payer worklist."""
+    import pa_workflow
+    from domains.authbridge import workflow as wf
+    try:
+        req = wf.build_request(body.form)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    report = wf.precheck(req)
+    if not report["ready"]:
+        raise HTTPException(400, {"message": "request is not ready to submit", "precheck": report})
+    try:
+        res = await pa_workflow.submit_request(body.form, submitter_org=org_id)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse(res, status_code=202)
+
+
+@app.get("/api/pa/worklist")
+def pa_worklist(org_id: str = Depends(current_org_id)) -> JSONResponse:
+    """The org's interactive cases (provider: my submissions; payer: my review queue)."""
+    from sqlmodel import select
+    from control.db import session as open_session
+    from control.models import Event, Run, RunMode
+    with open_session() as sess:
+        run_ids = {rid for rid in sess.exec(select(Event.run_id).where(Event.org_id == org_id)).all()}
+        if not run_ids:
+            return JSONResponse({"items": []})
+        runs = sess.exec(
+            select(Run).where(Run.id.in_(run_ids), Run.mode == RunMode.INTERACTIVE.value)
+            .order_by(Run.started_at.desc())
+        ).all()
+        items = [_pa_summary(r, _side_of(r, org_id)) for r in runs]
+    return JSONResponse({"items": items})
+
+
+@app.get("/api/pa/{run_id}")
+def pa_get(run_id: str, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    from control.db import session as open_session
+    from control.models import Run
+    with open_session() as sess:
+        run = sess.get(Run, run_id)
+        side = _side_of(run, org_id) if run else None
+        if run is None or side is None:
+            raise HTTPException(404, "case not found")
+        return JSONResponse(_pa_detail(sess, run, org_id, side))
+
+
+class DecideIn(BaseModel):
+    action: str                      # APPROVE | DENY | REQUEST_INFO | ESCALATE
+    reason_code: str | None = None
+    note: str = ""
+
+
+class DocsIn(BaseModel):
+    docs: list[str] = []
+
+
+class MdDecideIn(BaseModel):
+    outcome: str                     # APPROVE | DENY
+    note: str = ""
+
+
+def _require_side(run: Any, org_id: str, want: str) -> None:
+    if _side_of(run, org_id) != want:
+        raise HTTPException(403, f"only the {want} on this case may take this action")
+
+
+async def _load_run_for(org_id: str, run_id: str):
+    from control.db import session as open_session
+    from control.models import Run
+    with open_session() as sess:
+        run = sess.get(Run, run_id)
+        side = _side_of(run, org_id) if run else None
+    if run is None or side is None:
+        raise HTTPException(404, "case not found")
+    return run, side
+
+
+@app.post("/api/pa/{run_id}/review", status_code=202)
+async def pa_review(run_id: str, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    import pa_workflow
+    run, _ = await _load_run_for(org_id, run_id)
+    _require_side(run, org_id, "payer")
+    try:
+        return JSONResponse(await pa_workflow.start_review(run_id), status_code=202)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/pa/{run_id}/decide", status_code=202)
+async def pa_decide(run_id: str, body: DecideIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    import pa_workflow
+    run, _ = await _load_run_for(org_id, run_id)
+    _require_side(run, org_id, "payer")
+    try:
+        return JSONResponse(await pa_workflow.decide(
+            run_id, action=body.action, reason_code=body.reason_code, note=body.note), status_code=202)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/pa/{run_id}/respond", status_code=202)
+async def pa_respond(run_id: str, body: DocsIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    import pa_workflow
+    run, _ = await _load_run_for(org_id, run_id)
+    _require_side(run, org_id, "provider")
+    try:
+        return JSONResponse(await pa_workflow.respond_to_pend(run_id, docs=body.docs), status_code=202)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/pa/{run_id}/appeal", status_code=202)
+async def pa_appeal(run_id: str, body: DocsIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    import pa_workflow
+    run, _ = await _load_run_for(org_id, run_id)
+    _require_side(run, org_id, "provider")
+    try:
+        return JSONResponse(await pa_workflow.file_appeal(run_id, docs=body.docs), status_code=202)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/pa/{run_id}/accept")
+async def pa_accept(run_id: str, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    import pa_workflow
+    run, _ = await _load_run_for(org_id, run_id)
+    _require_side(run, org_id, "provider")
+    try:
+        return JSONResponse(await pa_workflow.accept_denial(run_id))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/pa/{run_id}/md-decide")
+async def pa_md_decide(run_id: str, body: MdDecideIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    import pa_workflow
+    run, _ = await _load_run_for(org_id, run_id)
+    _require_side(run, org_id, "payer")
+    try:
+        return JSONResponse(await pa_workflow.md_decide(run_id, outcome=body.outcome, note=body.note))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     await websocket.accept()

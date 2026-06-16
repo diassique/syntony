@@ -10,14 +10,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard, FolderClosed, Boxes, BarChart3, Settings as SettingsIcon,
   Play, Upload, Copy, Check, ExternalLink, FileText, Braces,
-  Lock, Clock, RotateCcw, Gavel, ChevronRight, Loader2,
+  Lock, Clock, RotateCcw, Gavel, ChevronRight, Loader2, Inbox, FilePlus2,
 } from 'lucide-react'
 import { runsApi, agentsApi, type AgentInfo, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
 import { Wordmark } from './Logo'
 import { Badge, Button, Select } from './ui'
+import { PaSubmit, PaWorklist, PaCase } from './PriorAuth'
 
-type View = 'overview' | 'cases' | 'agents' | 'insights' | 'settings'
+type View = 'overview' | 'prior_auth' | 'submit' | 'cases' | 'agents' | 'insights' | 'settings'
 
 export default function Console() {
   const { user, org, logout } = useAuth()
@@ -25,6 +26,7 @@ export default function Console() {
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<View>('overview')
   const [openRun, setOpenRun] = useState<string | null>(null)
+  const [openPa, setOpenPa] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
 
   const refresh = () => runsApi.list().then(setRuns).catch((e) => setError(String(e?.message || e)))
@@ -33,7 +35,9 @@ export default function Console() {
   if (!user) return null // App guards this route.
 
   const open = (id: string) => setOpenRun(id)
-  const go = (v: View) => { setOpenRun(null); setView(v) }
+  const go = (v: View) => { setOpenRun(null); setOpenPa(null); setView(v) }
+  const openPaCase = (id: string) => { setOpenRun(null); setOpenPa(id) }
+  const onSubmitted = (id: string) => { setView('prior_auth'); setOpenPa(id) }
 
   // Trigger a real cross-org negotiation, then drop straight into its Theater to watch it stream.
   const runLiveCase = async (caseName?: string) => {
@@ -75,6 +79,12 @@ export default function Console() {
           {openRun ? (
             <Theater runId={openRun} orgName={org?.name ?? 'Your organization'}
               onBack={() => setOpenRun(null)} onComplete={refresh} />
+          ) : openPa ? (
+            <PaCase runId={openPa} onBack={() => setOpenPa(null)} />
+          ) : view === 'submit' ? (
+            <PaSubmit onSubmitted={onSubmitted} />
+          ) : view === 'prior_auth' ? (
+            <PaWorklist onOpen={openPaCase} onNew={() => go('submit')} />
           ) : view === 'overview' ? (
             <Overview user={user} org={org} runs={runs} error={error} onOpen={open}
               onSeeAll={() => go('cases')} onRunCase={runLiveCase} onIntake={runIntake} starting={starting} />
@@ -112,7 +122,7 @@ function RunCaseButton({ onRunCase, starting, subtle }: { onRunCase: (caseName?:
       <Button variant={subtle ? 'secondary' : 'signal'} size="md" loading={starting}
         leadingIcon={<Play size={14} className="fill-current" strokeWidth={0} aria-hidden />}
         onClick={() => onRunCase(scenario)}>
-        {starting ? 'Starting a live case…' : 'Run a live case'}
+        {starting ? 'Starting…' : 'Sample run'}
       </Button>
     </div>
   )
@@ -154,6 +164,8 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
 }) {
   const items: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'prior_auth', label: 'Prior auth', icon: Inbox },
+    { id: 'submit', label: 'New request', icon: FilePlus2 },
     { id: 'cases', label: 'Cases', icon: FolderClosed },
     { id: 'agents', label: 'Agents', icon: Boxes },
     { id: 'insights', label: 'Insights', icon: BarChart3 },

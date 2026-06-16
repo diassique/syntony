@@ -25,6 +25,7 @@ Medical Director participant is wired.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -102,6 +103,22 @@ class AuthBridgeState:
     pending_consult: str | None = None  # which specialist the Reviewer is currently consulting
     retrieved_criteria: str = ""       # RAG: medical-necessity criterion the Guidelines agent cites
 
+    # --- interactive workflow (the real two-sided flow; autoplay leaves these untouched) ---
+    #: When True, plan() pauses (returns None) at every court-change so a real human on the
+    #: matching side acts via the API. When False the runner auto-drives (the "Sample run").
+    interactive: bool = False
+    payer_review_started: bool = False  # the payer opened the case and kicked off UM review
+    #: The action a payer human committed: "APPROVE" | "DENY" | "REQUEST_INFO" | "ESCALATE".
+    payer_action: str | None = None
+    payer_action_reason: str | None = None  # DenialReason code chosen by the payer (deny/info)
+    payer_note: str = ""               # the payer human's free-text rationale (optional)
+    provider_response_ready: bool = False  # provider supplied docs answering a payer info request
+    provider_appeal_ready: bool = False    # provider chose to appeal an appealable denial
+    new_docs: tuple[str, ...] = ()     # docs the provider just attached (pend response / appeal)
+    committed_turns: int = 0           # audit turn offset across resumed segments
+    recommendation: dict = field(default_factory=dict)  # UM recommendation surfaced to the payer
+    auth_number: str = ""              # issued on APPROVE (HCR02 analogue)
+
 
 @dataclass(frozen=True)
 class _Plan:
@@ -147,6 +164,130 @@ def _is_drug(req: PriorAuthRequest) -> bool:
     return req.procedure.system.upper() == "HCPCS"
 
 
+#: Appealable denial reason codes (string form) — a provider can cure these and resubmit.
+_APPEALABLE_CODES = frozenset(r.value for r in _APPEALABLE)
+
+
+def _auth_number(req: PriorAuthRequest) -> str:
+    """A deterministic synthetic authorization/certification number (the HCR02 analogue).
+    Stable per request so a resumed segment re-derives the same number. Synthetic only."""
+    digest = hashlib.sha1(f"{req.procedure.code}|{req.patient_ref}".encode()).hexdigest()
+    return "AUTH-" + str(int(digest[:8], 16) % 10_000_000).zfill(7)
+
+
+def _reset_payer_review(st: AuthBridgeState) -> None:
+    """Hand the case back to the payer for a fresh review (after a pend response or an appeal)."""
+    st.payer_review_started = False
+    st.payer_action = None
+    st.payer_action_reason = None
+    st.payer_note = ""
+    st.recommendation = {}
+
+
+def _suggested_action(d: Decision) -> str:
+    """Map a policy recommendation to the payer action the console pre-selects."""
+    if d.outcome is Outcome.APPROVE:
+        return "APPROVE"
+    if d.outcome is Outcome.REQUEST_INFO:
+        return "REQUEST_INFO"
+    return "ESCALATE" if d.escalate else "DENY"
+
+
+def _resolve_determination(st: AuthBridgeState, d: Decision) -> tuple[str, str | None, str]:
+    """Resolve (action, reason_code, reasons_text) for the payer determination.
+
+    Interactive: the payer human's committed action wins (policy is advisory, surfaced as a
+    recommendation). Autoplay: derive the action straight from policy (unchanged behavior)."""
+    reasons = "; ".join(d.reasons)
+    if st.interactive and st.payer_action:
+        reason_code = st.payer_action_reason or (d.reason_code.value if d.reason_code else None)
+        return st.payer_action, reason_code, (st.payer_note.strip() or reasons)
+    return _suggested_action(d), (d.reason_code.value if d.reason_code else None), reasons
+
+
+def _emit_determination(st: AuthBridgeState, action: str, reason_code: str | None, reasons: str) -> _Plan:
+    """Emit the move for a resolved payer determination — shared by autoplay and the live flow."""
+    if action == "APPROVE":
+        if not st.notified:
+            st.pending_consult = "notify"
+            return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
+                         "Approval reached — preparing the determination notice.",
+                         mentions=("payer.notification",), pa_event="CONSULT_NOTIFY")
+        if not st.auth_number:
+            st.auth_number = _auth_number(st.req)
+        overturned = st.appealed
+        verb = "APPROVE on reconsideration (overturned)" if overturned else "APPROVE"
+        return _Plan(
+            "payer.reviewer", Kind.DECISION, State.DECIDE,
+            f"{verb} — {reasons}. Authorization #{st.auth_number}.", mentions=("provider.counsel",),
+            pa_event="DECISION_OVERTURNED" if overturned else "DECISION_APPROVED",
+            payload_extra={"outcome": "APPROVE", "auth_number": st.auth_number,
+                           **({"overturned": True} if overturned else {})},
+        )
+    if action == "REQUEST_INFO":
+        st.pending_docs = tuple(_missing_docs(st.req))
+        st.info_satisfied = False
+        return _Plan(
+            "payer.reviewer", Kind.INFO_REQUEST, State.INFO,
+            f"Recoverable gap — requesting information: {reasons}",
+            mentions=("provider.counsel",),
+            pa_event="PENDED_FOR_INFO", denial_reason=reason_code,
+        )
+    if action == "ESCALATE":
+        return _Plan(
+            "payer.reviewer", Kind.ESCALATION, State.ESCALATE,
+            f"Borderline — not auto-denying; escalating to the Medical Director: {reasons}",
+            mentions=("payer.medical_director",),
+            pa_event="ESCALATED_TO_MD", denial_reason=reason_code,
+        )
+    # DENY: appealable → hand to Provider Appeals to cure & resubmit; else terminal.
+    if not st.appealed and reason_code in _APPEALABLE_CODES:
+        return _Plan(
+            "payer.reviewer", Kind.DECISION, State.REVISE,
+            f"DENY — {reasons}", mentions=("provider.appeals",),
+            pa_event="DECISION_DENIED", denial_reason=reason_code,
+            payload_extra={"outcome": "DENY", "appealable": True},
+        )
+    if not st.notified:
+        st.pending_consult = "notify"
+        return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
+                     "Denial determined — preparing the determination notice and appeal rights.",
+                     mentions=("payer.notification",), pa_event="CONSULT_NOTIFY")
+    return _Plan(
+        "payer.reviewer", Kind.DECISION, State.DECIDE,
+        f"DENY — {reasons}", mentions=("provider.counsel",),
+        pa_event="DECISION_DENIED", denial_reason=reason_code,
+        payload_extra={"outcome": "DENY"},
+    )
+
+
+def _emit_appeal(st: AuthBridgeState) -> _Plan:
+    """Provider Appeals cures the specific denial reason and resubmits for reconsideration.
+
+    Interactive: cure with the documents the provider actually attached; autoplay: cure from
+    the policy's required/step-therapy docs (unchanged behavior)."""
+    rule = POLICY_TABLE.get(st.req.procedure.code)
+    candidate = (list(st.new_docs) if (st.interactive and st.new_docs)
+                 else ([*rule.step_therapy_docs, *rule.required_docs] if rule else []))
+    cured: list[str] = []
+    for doc in candidate:
+        if doc not in st.req.supporting_docs:
+            st.req.supporting_docs = list(st.req.supporting_docs) + [doc]
+            cured.append(doc)
+    st.appealed = True
+    code = st.decision.reason_code.value if (st.decision and st.decision.reason_code) else "the denial"
+    facts = (f"Appeal: addressing {code} — supplied {cured} and requesting reconsideration."
+             if cured else f"Appeal: contesting {code}; requesting reconsideration.")
+    if st.interactive:
+        st.provider_appeal_ready = False
+        st.new_docs = ()
+        _reset_payer_review(st)
+    return _Plan(
+        "provider.appeals", Kind.PROPOSAL, State.REVIEW, facts,
+        mentions=("payer.reviewer",), pa_event="APPEAL_PACKET_ASSEMBLED",
+    )
+
+
 def plan(state: State, st: AuthBridgeState) -> _Plan | None:
     """Decide the next move purely from policy + the working request. No LLM, no I/O.
 
@@ -182,8 +323,8 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
             issues = completeness_issues(st.req)
             if issues:
                 fixes = _fix_request(st.req)
-                facts = ("Pre-submit completeness check found: " + "; ".join(issues) +
-                         ". Corrected before submission: " + "; ".join(fixes) + ".")
+                fixed = ". Corrected before submission: " + "; ".join(fixes) + "." if fixes else "."
+                facts = "Pre-submit completeness check found: " + "; ".join(issues) + fixed
             else:
                 facts = "Pre-submit completeness check passed; submitting the request to the payer."
             st.submitted = True
@@ -191,13 +332,22 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
                          mentions=("payer.reviewer",), pa_event="REQUEST_SUBMITTED")
         # Later passes: Counsel answers a payer information request.
         if st.pending_docs and not st.info_satisfied:
+            # Interactive: the provider must supply the documents — pause until they do.
+            if st.interactive and not st.provider_response_ready:
+                return None
+            # Which docs went in: provider-attached set (interactive) or the requested set (autoplay).
+            added = list(st.new_docs) if st.interactive else list(st.pending_docs)
             st.req.supporting_docs = list(st.req.supporting_docs) + [
-                d for d in st.pending_docs if d not in st.req.supporting_docs
+                d for d in added if d not in st.req.supporting_docs
             ]
             st.info_satisfied = True
+            if st.interactive:  # the cured request goes back to the payer for re-review
+                st.provider_response_ready = False
+                st.new_docs = ()
+                _reset_payer_review(st)
             return _Plan(
                 "provider.counsel", Kind.INFO_RESPONSE, State.REVIEW,
-                "Supplied the requested documentation: " + ", ".join(st.pending_docs) + ".",
+                "Supplied the requested documentation: " + (", ".join(added) or "no new documents") + ".",
                 mentions=("payer.reviewer",), pa_event="DOCUMENTATION_COLLECTED",
             )
         return _Plan(
@@ -207,6 +357,10 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
         )
 
     if state is State.REVIEW:
+        # Interactive: nothing happens on the payer side until a payer human opens the case.
+        if st.interactive and not st.payer_review_started:
+            return None
+
         # The Reviewer consults its specialists (each a RECRUIT round-trip) before deciding.
         if not st.guidelines_done:
             st.pending_consult = "guidelines"
@@ -226,60 +380,26 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
 
         d = necessity_decision(st.req)
         st.decision = d
-        reasons = "; ".join(d.reasons)
-        reason_code = d.reason_code.value if d.reason_code else None
+        st.recommendation = {
+            "outcome": d.outcome.value,
+            "reason_code": d.reason_code.value if d.reason_code else None,
+            "reasons": list(d.reasons),
+            "escalate": d.escalate,
+            "suggested_action": _suggested_action(d),
+        }
 
-        if d.outcome is Outcome.APPROVE:
-            if not st.notified:
-                st.pending_consult = "notify"
-                return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
-                             "Approval reached — preparing the determination notice.",
-                             mentions=("payer.notification",), pa_event="CONSULT_NOTIFY")
-            overturned = st.appealed
-            verb = "APPROVE on reconsideration (overturned)" if overturned else "APPROVE"
-            return _Plan(
-                "payer.reviewer", Kind.DECISION, State.DECIDE,
-                f"{verb} — {reasons}", mentions=("provider.counsel",),
-                pa_event="DECISION_OVERTURNED" if overturned else "DECISION_APPROVED",
-                payload_extra={"outcome": "APPROVE", **({"overturned": True} if overturned else {})},
-            )
-        if d.outcome is Outcome.REQUEST_INFO:
-            st.pending_docs = tuple(_missing_docs(st.req))
-            st.info_satisfied = False
-            return _Plan(
-                "payer.reviewer", Kind.INFO_REQUEST, State.INFO,
-                f"Recoverable gap — requesting information: {reasons}",
-                mentions=("provider.counsel",),
-                pa_event="PENDED_FOR_INFO", denial_reason=reason_code,
-            )
-        # DENY
-        if d.escalate:
-            return _Plan(
-                "payer.reviewer", Kind.ESCALATION, State.ESCALATE,
-                f"Borderline denial — not auto-denying; escalating to the Medical Director: {reasons}",
-                mentions=("payer.medical_director",),
-                pa_event="ESCALATED_TO_MD", denial_reason=reason_code,
-            )
-        # Appealable denial → don't terminate; hand to Provider Appeals to cure & resubmit.
-        if not st.appealed and d.reason_code in _APPEALABLE:
-            return _Plan(
-                "payer.reviewer", Kind.DECISION, State.REVISE,
-                f"DENY — {reasons}", mentions=("provider.appeals",),
-                pa_event="DECISION_DENIED", denial_reason=reason_code,
-                payload_extra={"outcome": "DENY", "appealable": True},
-            )
-        # Terminal denial → notify before recording the binding decision.
-        if not st.notified:
-            st.pending_consult = "notify"
-            return _Plan("payer.reviewer", Kind.RECRUIT_REQUEST, State.RECRUIT,
-                         "Denial determined — preparing the determination notice and appeal rights.",
-                         mentions=("payer.notification",), pa_event="CONSULT_NOTIFY")
-        return _Plan(
-            "payer.reviewer", Kind.DECISION, State.DECIDE,
-            f"DENY — {reasons}", mentions=("provider.counsel",),
-            pa_event="DECISION_DENIED", denial_reason=reason_code,
-            payload_extra={"outcome": "DENY"},
-        )
+        # Interactive: the consults are in; the payer human now commits the determination.
+        if st.interactive and st.payer_action is None:
+            return None
+
+        action, reason_code, reasons = _resolve_determination(st, d)
+        return _emit_determination(st, action, reason_code, reasons)
+
+    if state is State.REVISE:
+        # Interactive: the provider decides whether to appeal — pause until they do.
+        if st.interactive and not st.provider_appeal_ready:
+            return None
+        return _emit_appeal(st)
 
     if state is State.RECRUIT:
         c = st.pending_consult
@@ -311,24 +431,6 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
                          "decision rationale and, on a denial, the appeal rights and deadline.",
                          mentions=("payer.reviewer",), pa_event="NOTICE_DRAFTED")
         return None
-
-    if state is State.REVISE:
-        # Provider Appeals cures the specific denial reason and resubmits for reconsideration.
-        rule = POLICY_TABLE.get(st.req.procedure.code)
-        cured: list[str] = []
-        if rule:
-            for doc in (*rule.step_therapy_docs, *rule.required_docs):
-                if doc not in st.req.supporting_docs:
-                    st.req.supporting_docs = list(st.req.supporting_docs) + [doc]
-                    cured.append(doc)
-        st.appealed = True
-        code = st.decision.reason_code.value if (st.decision and st.decision.reason_code) else "the denial"
-        facts = (f"Appeal: addressing {code} — supplied {cured} and requesting reconsideration."
-                 if cured else f"Appeal: contesting {code}; requesting reconsideration.")
-        return _Plan(
-            "provider.appeals", Kind.PROPOSAL, State.REVIEW, facts,
-            mentions=("payer.reviewer",), pa_event="APPEAL_PACKET_ASSEMBLED",
-        )
 
     if state is State.ESCALATE:
         return _Plan(

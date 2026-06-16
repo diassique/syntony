@@ -62,12 +62,13 @@ def open_live_run(case_name: str) -> str:
         return run.id
 
 
-def _build_tools_for(case_id: str):
+def _build_tools_for(case_id: str, room_id: str | None = None):
     """Best-effort Band transport router (provider→clinic account, payer→payer account).
 
     Returns ``(tools_for, room_id)`` or ``(None, None)`` if Band can't be wired (missing keys
     or unreachable) — the negotiation then runs without posting to Band but still streams to
-    the audit trail.
+    the audit trail. Pass ``room_id`` to reuse an existing room across resumed segments (the
+    interactive workflow); ``None`` opens a fresh room per run.
     """
     try:
         from engine.band_room import RestRoomTools, agent_client, ensure_room
@@ -77,7 +78,7 @@ def _build_tools_for(case_id: str):
         payer_id = os.environ["PAYER_AGENT_ID"]
         clinic = agent_client(os.environ["CLINIC_AGENT_API_KEY"], rest_url)
         payer = agent_client(os.environ["PAYER_AGENT_API_KEY"], rest_url)
-        room = ensure_room(clinic, payer_id, room_id=None)  # a fresh room per live run
+        room = ensure_room(clinic, payer_id, room_id=room_id)  # reuse across segments when given
 
         mention_map = {rid: (payer_id if spec.side is Side.PAYER else clinic_id)
                        for rid, spec in ROLES.items()}
