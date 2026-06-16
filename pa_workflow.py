@@ -108,10 +108,12 @@ async def _advance(run_id: str, *, full: bool = False) -> dict:
         provider_org = data["side_to_org"]["provider"]
         history = _history_from_events(sess, run_id, provider_org)
         room_id = run.room_id
+        policy = service.load_policy(sess)  # reference data: reloaded from DB, not from workflow JSON
 
     side_to_org = data["side_to_org"]
     org_ids = list(dict.fromkeys(side_to_org.values()))
     st = wf.load_state(data["state"])
+    st.policy = policy
     start = State(data["fsm_state"])
     case_id = f"pa-{run_id}"
     base_turn = st.committed_turns
@@ -206,7 +208,7 @@ async def submit_request(form: dict, *, submitter_org: str, patient_id: str | No
                                       npi=req.ordering_provider.npi, code=req.procedure.code)
         if gc is not None:
             return _gold_card_autoapprove(sess, sides=sides, req=req, patient_id=patient_id, gc=gc)
-        st = wf.new_state(req, criteria=criteria, coverage_summary=cover)
+        st = wf.new_state(req, criteria=criteria, coverage_summary=cover, policy=service.load_policy(sess))
         run = service.start_run(sess, org_id=sides["provider"], case_name=_case_label(req))
         run.mode = RunMode.INTERACTIVE.value
         run.patient_id = patient_id

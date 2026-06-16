@@ -277,6 +277,21 @@ class DocType(SQLModel, table=True):
     sort_order: int = 0
 
 
+class PolicyRuleRow(SQLModel, table=True):
+    """A payer medical-necessity rule for one procedure code (the row form of the domain's
+    ``PolicyRule``). Seeded from code, served from the DB — a payer can edit its own policy.
+    List fields are JSON arrays of code prefixes / doc tokens."""
+
+    __tablename__ = "policy_rules"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    procedure_code: str = Field(index=True, unique=True)
+    required_diagnosis_prefixes: list = Field(default_factory=list, sa_type=JSON)
+    required_docs: list = Field(default_factory=list, sa_type=JSON)
+    step_therapy_docs: list = Field(default_factory=list, sa_type=JSON)
+    red_flag_prefixes: list = Field(default_factory=list, sa_type=JSON)
+    auto_approve: bool = False
+
+
 class Criterion(SQLModel, table=True):
     """A medical-necessity criterion (MCG/InterQual-style) the Clinical Guidelines agent retrieves
     via embeddings and cites. Editable reference content — seeded from code, served from the DB."""

@@ -99,9 +99,12 @@ def completeness_issues(req: PriorAuthRequest) -> list[str]:
     return issues
 
 
-def necessity_decision(req: PriorAuthRequest) -> Decision:
-    """Payer-side medical-necessity decision against the policy table."""
-    rule = POLICY_TABLE.get(req.procedure.code)
+def necessity_decision(req: PriorAuthRequest, policy: dict | None = None) -> Decision:
+    """Payer-side medical-necessity decision against the policy table.
+
+    ``policy`` is a ``{code: PolicyRule}`` map (DB-loaded at runtime); defaults to the built-in
+    ``POLICY_TABLE`` for offline use."""
+    rule = (policy or POLICY_TABLE).get(req.procedure.code)
     if rule is None:
         return Decision(Outcome.REQUEST_INFO, [f"No policy on file for CPT {req.procedure.code}; manual review."])
     if rule.auto_approve:

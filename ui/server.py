@@ -373,8 +373,8 @@ def pa_precheck(body: PrecheckIn, org_id: str = Depends(current_org_id)) -> JSON
         req = wf.build_request(body.form)
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
-    report = wf.precheck(req)
     with open_session() as sess:
+        report = wf.precheck(req, service.load_policy(sess))
         gc = service.active_gold_card(sess, org_id=org_id, npi=req.ordering_provider.npi, code=req.procedure.code)
         report["gold_card"] = None if gc is None else {
             "provider_name": gc.provider_name, "procedure_code": gc.procedure_code, "basis": gc.basis,

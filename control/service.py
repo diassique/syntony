@@ -271,6 +271,23 @@ def criteria_corpus(sess: Session) -> list[dict[str, str]]:
     return [{"id": c.slug, "text": c.text} for c in rows]
 
 
+def load_policy(sess: Session) -> dict:
+    """The payer policy as the domain's ``{code: PolicyRule}`` map, read from the DB. Falls back
+    to the built-in ``POLICY_TABLE`` when the table is empty (offline / unseeded)."""
+    from .models import PolicyRuleRow
+    from domains.authbridge.policy import POLICY_TABLE, PolicyRule
+    rows = sess.exec(select(PolicyRuleRow)).all()
+    if not rows:
+        return POLICY_TABLE
+    return {r.procedure_code: PolicyRule(
+        required_diagnosis_prefixes=tuple(r.required_diagnosis_prefixes),
+        required_docs=tuple(r.required_docs),
+        step_therapy_docs=tuple(r.step_therapy_docs),
+        red_flag_prefixes=tuple(r.red_flag_prefixes),
+        auto_approve=r.auto_approve,
+    ) for r in rows}
+
+
 # ---- gold carding (provider PA exemption; Texas HB 3459/3812) ------------------
 GOLD_MIN_TOTAL = 5      # minimum decided requests to qualify
 GOLD_MIN_RATE = 0.9     # ≥90% approvals

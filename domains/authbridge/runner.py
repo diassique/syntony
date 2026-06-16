@@ -119,6 +119,9 @@ class AuthBridgeState:
     recommendation: dict = field(default_factory=dict)  # UM recommendation surfaced to the payer
     auth_number: str = ""              # issued on APPROVE (HCR02 analogue)
     coverage_summary: str = ""         # real Coverage (plan + member id), cited by the eligibility step
+    #: The payer policy ({code: PolicyRule}) this case is decided against — DB-loaded at runtime,
+    #: defaults to the built-in table. NOT serialized (reference data; reloaded from the DB on resume).
+    policy: dict = field(default_factory=lambda: POLICY_TABLE)
 
 
 @dataclass(frozen=True)
@@ -153,8 +156,8 @@ def _fix_request(req: PriorAuthRequest) -> list[str]:
     return fixes
 
 
-def _missing_docs(req: PriorAuthRequest) -> list[str]:
-    rule = POLICY_TABLE.get(req.procedure.code)
+def _missing_docs(req: PriorAuthRequest, policy: dict | None = None) -> list[str]:
+    rule = (policy or POLICY_TABLE).get(req.procedure.code)
     if rule is None:
         return []
     return [d for d in rule.required_docs if d not in req.supporting_docs]
@@ -226,7 +229,7 @@ def _emit_determination(st: AuthBridgeState, action: str, reason_code: str | Non
                            **({"overturned": True} if overturned else {})},
         )
     if action == "REQUEST_INFO":
-        st.pending_docs = tuple(_missing_docs(st.req))
+        st.pending_docs = tuple(_missing_docs(st.req, st.policy))
         st.info_satisfied = False
         return _Plan(
             "payer.reviewer", Kind.INFO_REQUEST, State.INFO,
@@ -267,7 +270,7 @@ def _emit_appeal(st: AuthBridgeState) -> _Plan:
 
     Interactive: cure with the documents the provider actually attached; autoplay: cure from
     the policy's required/step-therapy docs (unchanged behavior)."""
-    rule = POLICY_TABLE.get(st.req.procedure.code)
+    rule = st.policy.get(st.req.procedure.code)
     candidate = (list(st.new_docs) if (st.interactive and st.new_docs)
                  else ([*rule.step_therapy_docs, *rule.required_docs] if rule else []))
     cured: list[str] = []
@@ -382,7 +385,7 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
                          "Consulting Pharmacy & Formulary on the drug policy.",
                          mentions=("payer.pharmacy",), pa_event="CONSULT_PHARMACY")
 
-        d = necessity_decision(st.req)
+        d = necessity_decision(st.req, st.policy)
         st.decision = d
         st.recommendation = {
             "outcome": d.outcome.value,
@@ -397,7 +400,7 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
             return None
 
         action, reason_code, reasons = _resolve_determination(st, d)
-        return _emit_determination(st, action, reason_code, reasons)
+        return _emit_determination(st, action, reason_code, reasons)  # _missing_docs uses st.policy
 
     if state is State.REVISE:
         # Interactive: the provider decides whether to appeal — pause until they do.
@@ -638,6 +641,7 @@ async def run_authbridge(
     pause_states: Any = None,
     request: PriorAuthRequest | None = None,
     criteria: str = "",
+    policy: dict | None = None,
 ):
     """Run one AuthBridge case end-to-end through the coordinator.
 
@@ -650,12 +654,13 @@ async def run_authbridge(
 
     from .cases import ALL_CASES
 
+    pol = policy or POLICY_TABLE
     if request is not None:
-        st = AuthBridgeState(req=request, retrieved_criteria=criteria)
+        st = AuthBridgeState(req=request, retrieved_criteria=criteria, policy=pol)
     else:
         if case_name not in ALL_CASES:
             raise KeyError(f"unknown case {case_name!r}; have {sorted(ALL_CASES)}")
-        st = AuthBridgeState(req=ALL_CASES[case_name](), retrieved_criteria=criteria)
+        st = AuthBridgeState(req=ALL_CASES[case_name](), retrieved_criteria=criteria, policy=pol)
     return await run_case(
         case_id=case_id or f"authbridge-{case_name}",
         start=State.FRAME,

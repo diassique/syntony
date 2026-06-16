@@ -32,7 +32,17 @@ def test_seed_refdata_populates_and_is_idempotent(sess):
     assert first["doc_types"] == len(SUPPORTING_DOC_TYPES)
     assert first["procedures"] == len(KNOWN_PROCEDURES)
     again = seed.seed_refdata(sess)  # idempotent — nothing new the second time
-    assert again == {"doc_types": 0, "procedures": 0, "criteria": 0}
+    assert again == {"doc_types": 0, "procedures": 0, "criteria": 0, "policy_rules": 0}
+
+
+def test_policy_loads_from_db_and_matches_the_constant(sess):
+    from domains.authbridge.policy import POLICY_TABLE
+    seed.seed_refdata(sess)
+    policy = service.load_policy(sess)
+    assert set(policy) == set(POLICY_TABLE)
+    # the J0135 step-therapy rule round-trips through the DB
+    assert policy["J0135"].step_therapy_docs == POLICY_TABLE["J0135"].step_therapy_docs
+    assert policy["72148"].red_flag_prefixes == POLICY_TABLE["72148"].red_flag_prefixes
 
 
 def test_catalogs_served_from_db_match_the_seed(sess):

@@ -143,6 +143,8 @@ async def execute_live_run(run_id: str, case_name: str, *, request=None, full: b
     except Exception as e:  # noqa: BLE001 — retrieval is optional
         print(f"live_run: criteria retrieval skipped ({type(e).__name__}: {str(e)[:100]})")
 
+    with open_session() as sess:
+        policy = service.load_policy(sess)  # payer policy from the DB (falls back to the built-in table)
     tools_for, room_id = _build_tools_for(f"live-{case_name}")
     paused = False
     try:
@@ -152,7 +154,7 @@ async def execute_live_run(run_id: str, case_name: str, *, request=None, full: b
         res = await run_authbridge(
             case_name, tools_for=tools_for, narrate=narrate,
             case_id=f"live-{case_name}", on_turn=on_turn, request=request, criteria=criteria,
-            pause_states={State.ARBITER},  # a borderline case pauses for the human Medical Director
+            policy=policy, pause_states={State.ARBITER},  # borderline pauses for the human MD
         )
         paused = res.stopped == "paused"
         final_state = res.final_state.value if hasattr(res.final_state, "value") else str(res.final_state)

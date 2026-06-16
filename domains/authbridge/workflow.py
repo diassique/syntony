@@ -137,12 +137,13 @@ def coding_issues(req: PriorAuthRequest) -> list[str]:
     return issues
 
 
-def precheck(req: PriorAuthRequest) -> dict:
+def precheck(req: PriorAuthRequest, policy: dict | None = None) -> dict:
     """Provider Counsel's pre-submit review. Returns a structured report the form renders so
-    the provider can fix gaps *before* submitting (the missing-doc / mismatched-code denials)."""
+    the provider can fix gaps *before* submitting (the missing-doc / mismatched-code denials).
+    ``policy`` is the DB-loaded ``{code: PolicyRule}`` map; defaults to the built-in table."""
     completeness = completeness_issues(req)
     coding = coding_issues(req)
-    rule = POLICY_TABLE.get(req.procedure.code.strip().upper())
+    rule = (policy or POLICY_TABLE).get(req.procedure.code.strip().upper())
     missing_required = [d for d in rule.required_docs if d not in req.supporting_docs] if rule else []
     missing_step = [d for d in rule.step_therapy_docs if d not in req.supporting_docs] if rule else []
     blocking = completeness + coding
@@ -187,10 +188,13 @@ def sla_deadline(started_at: datetime, urgency: str | None) -> datetime:
 
 # ---- working-state (de)serialization -------------------------------------------
 
-def new_state(req: PriorAuthRequest, *, criteria: str = "", coverage_summary: str = "") -> AuthBridgeState:
-    """A fresh interactive working state for a just-submitted request."""
+def new_state(req: PriorAuthRequest, *, criteria: str = "", coverage_summary: str = "",
+              policy: dict | None = None) -> AuthBridgeState:
+    """A fresh interactive working state for a just-submitted request. ``policy`` is the DB-loaded
+    map (defaults to the built-in table); it is held on the state but never serialized."""
+    from .policy import POLICY_TABLE
     return AuthBridgeState(req=req, interactive=True, retrieved_criteria=criteria,
-                           coverage_summary=coverage_summary)
+                           coverage_summary=coverage_summary, policy=policy or POLICY_TABLE)
 
 
 def dump_state(st: AuthBridgeState) -> dict:
