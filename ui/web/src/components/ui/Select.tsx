@@ -101,7 +101,9 @@ export function Select({
   }
 
   return (
-    <div ref={rootRef} className={cx('relative inline-block', className)}>
+    // Block-level so it fills a form cell (grid/Field); a flex parent (toolbar) sizes it to
+    // content. No hard min-width — that overflowed narrow grid columns and overlapped neighbors.
+    <div ref={rootRef} className={cx('relative', className)}>
       <button
         type="button"
         role="combobox"
@@ -114,7 +116,7 @@ export function Select({
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={onKeyDown}
         className={cx(
-          'inline-flex w-full min-w-[11rem] items-center justify-between gap-2 rounded-sm border border-line bg-paper font-medium leading-tight text-ink transition-colors',
+          'inline-flex w-full min-w-0 items-center justify-between gap-2 rounded-sm border border-line bg-paper font-medium leading-tight text-ink transition-colors',
           'hover:border-pine/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine/30 focus-visible:ring-offset-2 focus-visible:ring-offset-bone',
           'disabled:cursor-not-allowed disabled:opacity-60',
           SIZES[size],
@@ -148,7 +150,10 @@ export function Select({
                 aria-selected={isSelected}
                 aria-disabled={o.disabled || undefined}
                 onMouseEnter={() => !o.disabled && setActive(i)}
-                onClick={() => choose(i)}
+                // Commit on mousedown (not click): fires before the trigger blurs / the document
+                // outside-handler runs, and preventDefault keeps focus put — so the menu reliably
+                // closes instead of a dropped click leaving it open.
+                onMouseDown={(e) => { e.preventDefault(); choose(i) }}
                 className={cx(
                   'flex cursor-pointer items-center justify-between gap-3 rounded-[3px] px-2.5 py-1.5 text-[13px] transition-colors',
                   o.disabled && 'cursor-not-allowed opacity-50',
