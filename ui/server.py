@@ -104,21 +104,29 @@ def state(room: str = "") -> JSONResponse:
 
 
 @app.get("/api/agents")
-def list_agents(_user=Depends(current_user)) -> JSONResponse:
+def list_agents(org_id: str = Depends(current_org_id)) -> JSONResponse:
     """The agent roster (the mesh cast): each role's side, framework, model and the protocol
-    states it acts in. Static domain data — what the console's Agents view renders."""
-    from domains.authbridge.roles import ROLES
+    states it acts in. Served from the org's AgentConfig rows (DB); falls back to the code roster."""
+    from control.db import session as open_session
+    from control import service
+    with open_session() as sess:
+        cfgs = service.list_agent_configs(sess, org_id=org_id)
+    if cfgs:
+        roster = [
+            {
+                "id": c.role_id, "name": c.display_name, "side": c.side,
+                "framework": c.framework, "model": c.model or None,
+                "acts_in": (c.extra or {}).get("acts_in", []),
+                "human": (c.extra or {}).get("human", False),
+            }
+            for c in cfgs
+        ]
+        return JSONResponse({"agents": roster})
 
+    from domains.authbridge.roles import ROLES  # fallback: cast not seeded
     roster = [
-        {
-            "id": s.id,
-            "name": s.display_name,
-            "side": s.side.value,
-            "framework": s.framework.value,
-            "model": s.model,
-            "acts_in": [st.value for st in s.acts_in],
-            "human": s.is_human,
-        }
+        {"id": s.id, "name": s.display_name, "side": s.side.value, "framework": s.framework.value,
+         "model": s.model, "acts_in": [st.value for st in s.acts_in], "human": s.is_human}
         for s in ROLES.values()
     ]
     return JSONResponse({"agents": roster})

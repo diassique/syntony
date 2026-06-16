@@ -271,6 +271,20 @@ def criteria_corpus(sess: Session) -> list[dict[str, str]]:
     return [{"id": c.slug, "text": c.text} for c in rows]
 
 
+def list_agent_configs(sess: Session, *, org_id: str) -> list:
+    """The agent cast (AgentConfig rows) for an org's authbridge project, in seed order.
+    Empty if the project/cast isn't seeded — the caller then falls back to the code roster."""
+    from .models import AgentConfig, Project
+    proj = sess.exec(
+        select(Project).where(Project.org_id == org_id, Project.slug == "authbridge")
+    ).first()
+    if proj is None:
+        return []
+    return list(sess.exec(
+        select(AgentConfig).where(AgentConfig.project_id == proj.id).order_by(AgentConfig.created_at)
+    ).all())
+
+
 def load_policy(sess: Session) -> dict:
     """The payer policy as the domain's ``{code: PolicyRule}`` map, read from the DB. Falls back
     to the built-in ``POLICY_TABLE`` when the table is empty (offline / unseeded)."""

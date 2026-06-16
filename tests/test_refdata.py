@@ -35,6 +35,17 @@ def test_seed_refdata_populates_and_is_idempotent(sess):
     assert again == {"doc_types": 0, "procedures": 0, "criteria": 0, "policy_rules": 0}
 
 
+def test_agent_cast_seeds_into_agentconfig_and_serves_from_db(sess):
+    from domains.authbridge.roles import ROLES
+    summary = seed.seed_demo(sess)
+    provider_org = summary["provider"]["org_id"]
+    cfgs = service.list_agent_configs(sess, org_id=provider_org)
+    assert {c.role_id for c in cfgs} == set(ROLES)
+    md = next(c for c in cfgs if c.role_id == "payer.medical_director")
+    assert md.framework == "human" and md.extra.get("human") is True
+    assert "acts_in" in md.extra
+
+
 def test_policy_loads_from_db_and_matches_the_constant(sess):
     from domains.authbridge.policy import POLICY_TABLE
     seed.seed_refdata(sess)

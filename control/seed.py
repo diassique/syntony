@@ -79,13 +79,37 @@ def _get_or_create_owner(sess: Session, *, email: str, name: str, password: str,
     return user
 
 
-def _ensure_project(sess: Session, *, org: Organization) -> None:
+def _ensure_project(sess: Session, *, org: Organization) -> Project:
     existing = sess.exec(
         select(Project).where(Project.org_id == org.id, Project.slug == "authbridge")
     ).first()
     if existing is None:
-        sess.add(Project(org_id=org.id, name="Prior Authorization", slug="authbridge", domain="authbridge"))
+        existing = Project(org_id=org.id, name="Prior Authorization", slug="authbridge", domain="authbridge")
+        sess.add(existing)
         sess.commit()
+        sess.refresh(existing)
+    return existing
+
+
+def _seed_agents(sess: Session, *, project_id: str) -> int:
+    """Seed the AuthBridge agent cast into a project's AgentConfig rows from ``roles.ROLES``
+    (idempotent by role id). The roster is then served from the DB."""
+    from .models import AgentConfig
+    from domains.authbridge.roles import ROLES
+    n = 0
+    for spec in ROLES.values():
+        if sess.exec(select(AgentConfig).where(
+                AgentConfig.project_id == project_id, AgentConfig.role_id == spec.id)).first() is not None:
+            continue
+        sess.add(AgentConfig(
+            project_id=project_id, role_id=spec.id, display_name=spec.display_name,
+            side=spec.side.value, framework=spec.framework.value, model=spec.model or "",
+            system_prompt=spec.system_prompt,
+            extra={"acts_in": [s.value for s in spec.acts_in], "human": spec.is_human, **(spec.extra or {})},
+        ))
+        n += 1
+    sess.commit()
+    return n
 
 
 def _ensure_credential(sess: Session, *, org: Organization, side: str, env_prefix: str, kind: str) -> bool:
@@ -145,9 +169,11 @@ def seed_demo(sess: Session, *, password: str | None = None) -> dict:
     for side, acc in DEMO_ACCOUNTS.items():
         org = _get_or_create_org(sess, name=acc["org_name"], slug=acc["org_slug"])
         _get_or_create_owner(sess, email=acc["email"], name=acc["name"], password=pw, org=org)
-        _ensure_project(sess, org=org)
+        project = _ensure_project(sess, org=org)
+        agents = _seed_agents(sess, project_id=project.id)  # the mesh cast → AgentConfig rows
         has_cred = _ensure_credential(sess, org=org, side=side, env_prefix=acc["env_prefix"], kind=acc["cred_kind"])
-        summary[side] = {"org_id": org.id, "slug": org.slug, "email": acc["email"], "credential": has_cred}
+        summary[side] = {"org_id": org.id, "slug": org.slug, "email": acc["email"],
+                         "credential": has_cred, "agents": agents}
     summary["refdata"] = seed_refdata(sess)  # global reference catalogs
     # Curated synthetic patient roster lives on the provider (clinic) org.
     from .seed_patients import seed_patients
@@ -191,7 +217,7 @@ def main() -> None:
                   f"{info['criteria']} criteria, {info['policy_rules']} policy rules)")
             continue
         cred = "✓ band key" if info["credential"] else "— no band key in env"
-        print(f"  {side:9} {info['email']:22} org={info['slug']:18} {cred}")
+        print(f"  {side:9} {info['email']:22} org={info['slug']:18} {cred}  ({info.get('agents', 0)} agents)")
     print(f"\nLogin password for all demo accounts: {pw!r}")
 
 
