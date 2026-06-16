@@ -119,9 +119,17 @@ def seed_demo(sess: Session, *, password: str | None = None) -> dict:
         summary[side] = {"org_id": org.id, "slug": org.slug, "email": acc["email"], "credential": has_cred}
     # Curated synthetic patient roster lives on the provider (clinic) org.
     from .seed_patients import seed_patients
+    from . import service
     provider_org_id = summary.get("provider", {}).get("org_id")
     if provider_org_id:
         summary["patients"] = {"created": seed_patients(sess, clinic_org_id=provider_org_id)}
+        # One issued gold card so the exemption is demonstrable out of the box (TX HB 3459 ≥90%).
+        service.issue_gold_card(
+            sess, org_id=provider_org_id, provider_npi="1000000007",
+            provider_name="Dr. Rivera (synthetic)", procedure_code="72148",
+            procedure_display="MRI lumbar spine w/o contrast", approvals=16, total=17,
+            basis="94% approvals over 17 requests (rolling 6 months)",
+        )
     return summary
 
 

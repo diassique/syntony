@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FilePlus2, Inbox, ArrowLeft, Plus, X, Check, ShieldCheck, ShieldAlert, Clock,
   Stethoscope, Gavel, Send, RotateCcw, FileSearch, AlertTriangle, Loader2, CheckCircle2,
-  Users,
+  Users, Award,
 } from 'lucide-react'
 import {
   paApi, patientsApi, PA_STATUS_LABEL,
@@ -316,10 +316,12 @@ export function PaSubmit({ onSubmitted, initialPatientId }: { onSubmitted: (runI
           <PrecheckPanel report={report} checking={checking} />
           {error && <p className="mt-3 text-[13px] text-coral">{error}</p>}
           <Button className="mt-4 w-full" size="lg" loading={submitting} disabled={!ready || submitting}
-            leadingIcon={<Send size={15} strokeWidth={1.75} />} onClick={submit}>
-            {ready ? 'Submit to payer' : 'Resolve issues to submit'}
+            leadingIcon={report?.gold_card ? <Award size={15} strokeWidth={1.75} /> : <Send size={15} strokeWidth={1.75} />} onClick={submit}>
+            {!ready ? 'Resolve issues to submit' : report?.gold_card ? 'Submit — auto-approves' : 'Submit to payer'}
           </Button>
-          <p className="mt-2 text-center text-[11px] text-ink-faint">The request enters the payer's worklist for review.</p>
+          <p className="mt-2 text-center text-[11px] text-ink-faint">
+            {report?.gold_card ? 'Gold-carded provider — authorized on submit, no review.' : "The request enters the payer's worklist for review."}
+          </p>
         </div>
       </div>
     </div>
@@ -350,6 +352,16 @@ function PrecheckPanel({ report, checking }: { report: PrecheckReport | null; ch
         <p className="text-[13px] text-ink-faint">Enter a procedure code to run the pre-submit check.</p>
       ) : (
         <div className="space-y-3 text-[13px]">
+          {report.gold_card && (
+            <div className="rounded-sm border border-coral/40 bg-coral/[0.06] p-3">
+              <div className="flex items-center gap-2 font-medium text-coral">
+                <Award size={15} strokeWidth={1.75} /> Gold-carded — auto-approves
+              </div>
+              <p className="mt-1 text-ink-soft">
+                {report.gold_card.provider_name} is exempt for {report.gold_card.procedure_code} ({report.gold_card.basis}). This request is authorized on submit, skipping review.
+              </p>
+            </div>
+          )}
           <div className={`flex items-center gap-2 font-medium ${report.ready ? 'text-pine' : 'text-coral'}`}>
             {report.ready ? <ShieldCheck size={16} strokeWidth={1.75} /> : <ShieldAlert size={16} strokeWidth={1.75} />}
             {report.ready ? 'Ready to submit' : 'Fix before submitting'}
@@ -736,6 +748,7 @@ function Timeline({ items }: { items: PaTimelineItem[] }) {
                   <span className="text-[13px] font-medium text-ink">{authorLabel(e.author)}</span>
                   {e.pa_event && <Badge tone="neutral">{e.pa_event.replace(/_/g, ' ').toLowerCase()}</Badge>}
                   {e.outcome && <Badge tone={e.outcome === 'APPROVE' ? 'pine' : 'coral'}>{e.outcome}</Badge>}
+                  {e.gold_card && <Badge tone="coral">gold card</Badge>}
                   {e.overturned && <Badge tone="pine">overturned</Badge>}
                   {e.hitl && <Badge tone="ink">human</Badge>}
                   {e.denial_reason && <Badge tone="coral">{e.denial_reason}</Badge>}

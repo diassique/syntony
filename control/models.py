@@ -265,6 +265,27 @@ class Condition(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
 
 
+class GoldCard(SQLModel, table=True):
+    """A provider gold-card exemption: a provider with a strong approval record for a service is
+    exempted from prior auth for it (modeled on Texas HB 3459/3812 — ≥90% approvals, ≥5 requests).
+    Matching requests auto-approve and skip review. Keyed by the provider org + ordering NPI +
+    procedure code. ``status='active'`` enables the exemption."""
+
+    __tablename__ = "gold_cards"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    org_id: str = Field(foreign_key="organizations.id", index=True)  # the provider (clinic) org
+    provider_npi: str = Field(index=True)
+    provider_name: str = ""
+    procedure_code: str = Field(index=True)
+    procedure_display: str = ""
+    approvals: int = 0
+    total: int = 0
+    rate: float = 0.0
+    status: str = "active"                  # "active" | "inactive"
+    basis: str = ""                         # human note (e.g. "94% approvals over 17 requests")
+    issued_at: datetime = Field(default_factory=_now)
+
+
 class TreatmentRecord(SQLModel, table=True):
     """Documented prior care on the chart (Procedure/MedicationStatement-flavored). ``doc_token``
     maps to a PA ``supporting_docs`` token, so the chart drives the request's document checklist."""

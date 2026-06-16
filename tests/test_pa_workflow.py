@@ -43,7 +43,8 @@ def _form(**over):
         "diagnoses": [{"code": "M54.5", "display": "Low back pain"}],
         "clinical_justification": "6 weeks PT failed; persistent radiculopathy.",
         "supporting_docs": ["conservative_therapy_notes", "imaging_order"],
-        "ordering_provider": {"npi": "1000000007", "name": "Dr X", "signed": True},
+        # a non-gold-carded provider, so these workflow tests exercise the full review path
+        "ordering_provider": {"npi": "2000000008", "name": "Dr X", "signed": True},
         "urgency": "routine",
     }
     base.update(over)

@@ -48,7 +48,7 @@ def record_envelope(
     room_payload: dict[str, Any] = {"message": message}
     # carry PA audit + provenance + determination details onto the room copy
     for k in ("outcome", "pa_event", "denial_reason", "framework", "via",
-              "auth_number", "overturned", "hitl", "appealable"):
+              "auth_number", "overturned", "hitl", "appealable", "gold_card"):
         if env.payload.get(k):
             room_payload[k] = env.payload[k]
 

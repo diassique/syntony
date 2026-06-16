@@ -19,6 +19,7 @@ from .models import (
     Coverage,
     Credential,
     Event,
+    GoldCard,
     Membership,
     MemberRole,
     Organization,
@@ -249,6 +250,89 @@ def coverage_summary(cov: Coverage | None) -> str:
     if cov is None:
         return ""
     return f"{cov.payer_name} — {cov.plan_type}, member {cov.member_id} ({cov.status})"
+
+
+# ---- gold carding (provider PA exemption; Texas HB 3459/3812) ------------------
+GOLD_MIN_TOTAL = 5      # minimum decided requests to qualify
+GOLD_MIN_RATE = 0.9     # ≥90% approvals
+
+
+def active_gold_card(sess: Session, *, org_id: str, npi: str, code: str) -> GoldCard | None:
+    """An active exemption for this provider + procedure, if any."""
+    if not npi or not code:
+        return None
+    return sess.exec(
+        select(GoldCard).where(GoldCard.org_id == org_id, GoldCard.provider_npi == npi,
+                               GoldCard.procedure_code == code, GoldCard.status == "active")
+    ).first()
+
+
+def list_gold_cards(sess: Session, *, org_id: str) -> list[GoldCard]:
+    return list(sess.exec(
+        select(GoldCard).where(GoldCard.org_id == org_id, GoldCard.status == "active")
+    ).all())
+
+
+def issue_gold_card(sess: Session, *, org_id: str, provider_npi: str, provider_name: str,
+                    procedure_code: str, procedure_display: str, approvals: int, total: int,
+                    basis: str) -> GoldCard:
+    """Issue (or return the existing) gold card for a provider + procedure. Idempotent."""
+    existing = sess.exec(
+        select(GoldCard).where(GoldCard.org_id == org_id, GoldCard.provider_npi == provider_npi,
+                               GoldCard.procedure_code == procedure_code)
+    ).first()
+    if existing is not None:
+        return existing
+    gc = GoldCard(org_id=org_id, provider_npi=provider_npi, provider_name=provider_name,
+                  procedure_code=procedure_code, procedure_display=procedure_display,
+                  approvals=approvals, total=total, rate=round(approvals / total, 3) if total else 0.0,
+                  status="active", basis=basis)
+    sess.add(gc)
+    sess.commit()
+    sess.refresh(gc)
+    return gc
+
+
+def recompute_gold_cards(sess: Session, *, org_id: str) -> int:
+    """Derive gold cards from the org's decided interactive runs (per provider NPI + procedure):
+    ≥``GOLD_MIN_TOTAL`` decided and ≥``GOLD_MIN_RATE`` approved → an active exemption. Additive —
+    updates derived stats and creates new cards, never deactivates a previously-issued one.
+    Returns the number of NEW cards created."""
+    from collections import defaultdict
+    runs = sess.exec(
+        select(Run).where(Run.org_id == org_id, Run.mode == "interactive",
+                          Run.status == RunStatus.SUCCEEDED.value)
+    ).all()
+    groups: dict[tuple[str, str], dict] = defaultdict(lambda: {"approvals": 0, "total": 0, "name": "", "display": ""})
+    for r in runs:
+        req = (r.workflow or {}).get("state", {}).get("req", {})
+        npi = (req.get("ordering_provider") or {}).get("npi", "")
+        code = (req.get("procedure") or {}).get("code", "")
+        if not npi or not code or r.outcome not in ("APPROVE", "DENY"):
+            continue
+        g = groups[(npi, code)]
+        g["total"] += 1
+        if r.outcome == "APPROVE":
+            g["approvals"] += 1
+        g["name"] = (req.get("ordering_provider") or {}).get("name", "") or g["name"]
+        g["display"] = (req.get("procedure") or {}).get("display", "") or g["display"]
+    created = 0
+    for (npi, code), g in groups.items():
+        rate = g["approvals"] / g["total"] if g["total"] else 0.0
+        if g["total"] < GOLD_MIN_TOTAL or rate < GOLD_MIN_RATE:
+            continue
+        existing = active_gold_card(sess, org_id=org_id, npi=npi, code=code)
+        if existing is not None:
+            existing.approvals, existing.total, existing.rate = g["approvals"], g["total"], round(rate, 3)
+            sess.add(existing)
+        else:
+            sess.add(GoldCard(org_id=org_id, provider_npi=npi, provider_name=g["name"],
+                              procedure_code=code, procedure_display=g["display"],
+                              approvals=g["approvals"], total=g["total"], rate=round(rate, 3),
+                              status="active", basis=f"{round(100 * rate)}% approvals over {g['total']} requests"))
+            created += 1
+    sess.commit()
+    return created
 
 
 def finish_run(sess: Session, *, run: Run, status: str = RunStatus.SUCCEEDED.value,

@@ -199,6 +199,11 @@ async def submit_request(form: dict, *, submitter_org: str, patient_id: str | No
             if patient is None:
                 raise ValueError("patient not found on this organization's roster")
             cover = service.coverage_summary(service.patient_coverage(sess, patient_id))
+        # Gold carding: a trusted provider+service is exempt → auto-approve, skip payer review.
+        gc = service.active_gold_card(sess, org_id=sides["provider"],
+                                      npi=req.ordering_provider.npi, code=req.procedure.code)
+        if gc is not None:
+            return _gold_card_autoapprove(sess, sides=sides, req=req, patient_id=patient_id, gc=gc)
         st = wf.new_state(req, criteria=criteria, coverage_summary=cover)
         run = service.start_run(sess, org_id=sides["provider"], case_name=_case_label(req))
         run.mode = RunMode.INTERACTIVE.value
@@ -210,6 +215,40 @@ async def submit_request(form: dict, *, submitter_org: str, patient_id: str | No
         sess.refresh(run)
         run_id = run.id
     return await _advance(run_id, full=full)
+
+
+def _gold_card_autoapprove(sess, *, sides: dict[str, str], req, patient_id: str | None, gc) -> dict:
+    """A gold-carded provider+service is authorized on submit, with no payer review — one
+    GOLD_CARD_EXEMPTION decision recorded to the audit trail (the burden reduction PA reform wants)."""
+    from domains.authbridge.runner import _auth_number
+    org_ids = list(dict.fromkeys(sides.values()))
+    st = wf.new_state(req)
+    st.submitted = True
+    st.auth_number = _auth_number(req)
+    run = service.start_run(sess, org_id=sides["provider"], case_name=_case_label(req))
+    run.mode = RunMode.INTERACTIVE.value
+    run.patient_id = patient_id
+    run.urgency = "expedited" if req.urgency is Urgency.URGENT else "standard"
+    msg = (f"Gold-card exemption — {gc.provider_name} is gold-carded for {req.procedure.code} "
+           f"({gc.basis}). Auto-approved without review. Authorization #{st.auth_number}.")
+    env = Envelope(
+        case_id=f"pa-{run.id}", turn=0, author="payer.reviewer", kind=Kind.DECISION,
+        visibility=Visibility.ROOM,
+        payload={"message": msg, "outcome": "APPROVE", "pa_event": "GOLD_CARD_EXEMPTION",
+                 "auth_number": st.auth_number, "gold_card": True},
+    )
+    st.committed_turns = 1
+    run.workflow = {"side_to_org": sides, "state": wf.dump_state(st), "fsm_state": State.DECIDE.value}
+    sess.add(run)
+    sess.commit()
+    sess.refresh(run)
+    ingest.record_envelope(sess, run=run, env=env, org_ids=org_ids,
+                           side_to_org=sides, author_side=_author_side)
+    for org_id in org_ids:
+        service.record_usage(sess, org_id=org_id, run_id=run.id, kind="run", units=1)
+    service.finish_run(sess, run=run, status=RunStatus.SUCCEEDED.value,
+                       final_state=State.DECIDE.value, turns=1, outcome="APPROVE")
+    return {"run_id": run.id, "status": RunStatus.SUCCEEDED.value, "outcome": "APPROVE", "gold_card": True}
 
 
 def _require_status(run: Run, *expected: str) -> None:

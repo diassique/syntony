@@ -70,7 +70,8 @@ def test_submit_from_patient_links_run_and_cites_real_coverage(ctx):
         "diagnoses": [{"code": "M54.5", "display": "Low back pain"}],
         "clinical_justification": "8 wks PT failed; radiculopathy",
         "supporting_docs": ["conservative_therapy_notes", "imaging_order"],
-        "ordering_provider": {"npi": "1000000007", "name": "Dr Rivera", "signed": True},
+        # non-gold-carded provider so the request goes through the full review (not auto-approved)
+        "ordering_provider": {"npi": "2000000008", "name": "Dr Rivera", "signed": True},
     }
     res = asyncio.run(pa_workflow.submit_request(form, submitter_org=clinic_org, patient_id=pid))
     run_id = res["run_id"]

@@ -321,6 +321,7 @@ def _pa_detail(sess: Any, run: Any, org_id: str, side: str | None) -> dict:
         "auth_number": (e.payload or {}).get("auth_number"),
         "overturned": (e.payload or {}).get("overturned"),
         "hitl": (e.payload or {}).get("hitl"),
+        "gold_card": (e.payload or {}).get("gold_card"),
         "via": (e.payload or {}).get("via"),
         "framework": (e.payload or {}).get("framework"),
     } for e in rows]
@@ -349,14 +350,23 @@ def pa_options(_user=Depends(current_user)) -> JSONResponse:
 
 
 @app.post("/api/pa/precheck")
-def pa_precheck(body: PrecheckIn, _user=Depends(current_user)) -> JSONResponse:
-    """Provider Counsel's live pre-submit check — flags gaps before the request is filed."""
+def pa_precheck(body: PrecheckIn, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    """Provider Counsel's live pre-submit check — flags gaps before the request is filed, and tells
+    the provider up front if this provider+service is gold-carded (will auto-approve)."""
     from domains.authbridge import workflow as wf
+    from control.db import session as open_session
+    from control import service
     try:
         req = wf.build_request(body.form)
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
-    return JSONResponse(wf.precheck(req))
+    report = wf.precheck(req)
+    with open_session() as sess:
+        gc = service.active_gold_card(sess, org_id=org_id, npi=req.ordering_provider.npi, code=req.procedure.code)
+        report["gold_card"] = None if gc is None else {
+            "provider_name": gc.provider_name, "procedure_code": gc.procedure_code, "basis": gc.basis,
+        }
+    return JSONResponse(report)
 
 
 class SubmitIn(BaseModel):

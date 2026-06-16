@@ -201,6 +201,7 @@ export interface PrecheckReport {
   missing_required_docs: string[]
   missing_step_therapy_docs: string[]
   advisories: string[]
+  gold_card?: { provider_name: string; procedure_code: string; basis: string } | null
 }
 
 export interface PaOptions {
@@ -222,6 +223,7 @@ export interface PaTimelineItem {
   auth_number?: string | null
   overturned?: boolean | null
   hitl?: boolean | null
+  gold_card?: boolean | null
   via?: string | null
   framework?: string | null
 }
