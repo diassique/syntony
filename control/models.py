@@ -164,6 +164,7 @@ class Run(SQLModel, table=True):
     org_id: str = Field(foreign_key="organizations.id", index=True)
     project_id: str | None = Field(default=None, foreign_key="projects.id", index=True)
     case_name: str = ""
+    patient_id: str | None = Field(default=None, foreign_key="patients.id", index=True)
     status: str = Field(default=RunStatus.RUNNING.value)
     mode: str = Field(default=RunMode.AUTO.value)  # "auto" (Sample run) | "interactive" (real flow)
     final_state: str | None = None
@@ -205,4 +206,75 @@ class UsageRecord(SQLModel, table=True):
     input_tokens: int = 0
     output_tokens: int = 0
     units: int = 1
+    created_at: datetime = Field(default_factory=_now)
+
+
+# ---- synthetic EHR: the clinic's patient chart (FHIR US Core-aligned, no real PHI) ----
+# A provider org owns a roster of synthetic patients; a prior-auth request is assembled from a
+# patient's chart (demographics + coverage + problem list + documented prior care). Mirrors the
+# real US data model — US Core Patient/Condition, FHIR Coverage, X12 270/271 eligibility fields.
+
+class Patient(SQLModel, table=True):
+    """A synthetic patient on a provider org's roster (US Core Patient). NOT real PII."""
+
+    __tablename__ = "patients"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    org_id: str = Field(foreign_key="organizations.id", index=True)  # the owning clinic org
+    mrn: str = Field(index=True)            # clinic medical record number
+    given_name: str = ""
+    family_name: str = ""
+    dob: str = ""                           # ISO date string, synthetic
+    sex: str = ""                           # administrative sex: "female" | "male"
+    gender: str = ""                        # optional gender identity
+    address_line: str = ""
+    city: str = ""
+    state: str = ""
+    postal_code: str = ""
+    phone: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class Coverage(SQLModel, table=True):
+    """A patient's insurance coverage (FHIR Coverage + the fields an X12 270/271 carries)."""
+
+    __tablename__ = "coverages"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    patient_id: str = Field(foreign_key="patients.id", index=True)
+    payer_name: str = ""
+    plan_type: str = ""                     # "Medicare Advantage" | "Medicaid" | "Commercial" | "QHP"
+    member_id: str = ""                     # subscriber id (X12 NM109/MI)
+    group_number: str = ""
+    relationship: str = "self"              # subscriber relationship
+    status: str = "active"                  # "active" | "inactive" (271 coverage status)
+    period_start: str = ""
+    period_end: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class Condition(SQLModel, table=True):
+    """A problem-list entry (US Core Condition): an ICD-10-CM diagnosis on the chart."""
+
+    __tablename__ = "conditions"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    patient_id: str = Field(foreign_key="patients.id", index=True)
+    system: str = "ICD-10-CM"
+    code: str = ""
+    display: str = ""
+    clinical_status: str = "active"
+    onset_date: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class TreatmentRecord(SQLModel, table=True):
+    """Documented prior care on the chart (Procedure/MedicationStatement-flavored). ``doc_token``
+    maps to a PA ``supporting_docs`` token, so the chart drives the request's document checklist."""
+
+    __tablename__ = "treatment_records"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    patient_id: str = Field(foreign_key="patients.id", index=True)
+    kind: str = ""                          # "conservative_therapy" | "step_therapy" | "imaging" | …
+    doc_token: str = ""                     # e.g. "conservative_therapy_notes" (→ supporting_docs)
+    description: str = ""
+    date: str = ""
+    outcome: str = ""
     created_at: datetime = Field(default_factory=_now)

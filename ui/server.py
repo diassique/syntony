@@ -361,6 +361,7 @@ def pa_precheck(body: PrecheckIn, _user=Depends(current_user)) -> JSONResponse:
 
 class SubmitIn(BaseModel):
     form: dict
+    patient_id: str | None = None
 
 
 @app.post("/api/pa/submit", status_code=202)
@@ -376,10 +377,71 @@ async def pa_submit(body: SubmitIn, org_id: str = Depends(current_org_id)) -> JS
     if not report["ready"]:
         raise HTTPException(400, {"message": "request is not ready to submit", "precheck": report})
     try:
-        res = await pa_workflow.submit_request(body.form, submitter_org=org_id)
+        res = await pa_workflow.submit_request(body.form, submitter_org=org_id, patient_id=body.patient_id)
     except (ValueError, RuntimeError) as e:
         raise HTTPException(400, str(e))
     return JSONResponse(res, status_code=202)
+
+
+# ---- synthetic patient charts (the clinic's EHR roster) --------------------------
+
+def _patient_summary(p: Any, cov: Any, n_conditions: int) -> dict:
+    return {
+        "id": p.id, "mrn": p.mrn, "name": f"{p.given_name} {p.family_name}".strip(),
+        "dob": p.dob, "sex": p.sex, "conditions": n_conditions,
+        "coverage": None if cov is None else {
+            "payer": cov.payer_name, "plan_type": cov.plan_type, "member_id": cov.member_id, "status": cov.status,
+        },
+    }
+
+
+@app.get("/api/patients")
+def patients_list(org_id: str = Depends(current_org_id)) -> JSONResponse:
+    """The org's synthetic patient roster (charts live on the provider/clinic org)."""
+    from control.db import session as open_session
+    from control import service
+    with open_session() as sess:
+        out = []
+        for p in service.list_patients(sess, org_id=org_id):
+            cov = service.patient_coverage(sess, p.id)
+            out.append(_patient_summary(p, cov, len(service.patient_conditions(sess, p.id))))
+    return JSONResponse({"patients": out})
+
+
+@app.get("/api/patients/{patient_id}")
+def patient_chart(patient_id: str, org_id: str = Depends(current_org_id)) -> JSONResponse:
+    """One patient's chart (demographics + coverage + problem list + documented prior care) plus
+    the prior-auth cases linked to them. Org-scoped (a payer org sees no clinic charts)."""
+    from control.db import session as open_session
+    from control import service
+    with open_session() as sess:
+        p = service.get_patient(sess, org_id=org_id, patient_id=patient_id)
+        if p is None:
+            raise HTTPException(404, "patient not found")
+        cov = service.patient_coverage(sess, p.id)
+        chart = {
+            "patient": {
+                "id": p.id, "mrn": p.mrn, "given_name": p.given_name, "family_name": p.family_name,
+                "name": f"{p.given_name} {p.family_name}".strip(), "dob": p.dob, "sex": p.sex,
+                "address": ", ".join(x for x in [p.address_line, p.city, p.state, p.postal_code] if x),
+                "phone": p.phone,
+            },
+            "coverage": None if cov is None else {
+                "payer": cov.payer_name, "plan_type": cov.plan_type, "member_id": cov.member_id,
+                "group_number": cov.group_number, "status": cov.status,
+                "period_start": cov.period_start, "period_end": cov.period_end,
+            },
+            "conditions": [{"system": c.system, "code": c.code, "display": c.display,
+                            "status": c.clinical_status, "onset": c.onset_date}
+                           for c in service.patient_conditions(sess, p.id)],
+            "treatments": [{"kind": t.kind, "doc_token": t.doc_token, "description": t.description,
+                            "date": t.date, "outcome": t.outcome}
+                           for t in service.patient_treatments(sess, p.id)],
+            "cases": [{"run_id": r.id, "case": r.case_name, "status": r.status, "outcome": r.outcome,
+                       "urgency": r.urgency, "started_at": r.started_at.isoformat() if r.started_at else None}
+                      for r in service.patient_runs(sess, p.id)],
+        }
+    return JSONResponse(chart)
 
 
 @app.get("/api/pa/worklist")

@@ -15,14 +15,18 @@ from sqlmodel import Session, select
 from . import security
 from .models import (
     ApiKey,
+    Condition,
+    Coverage,
     Credential,
     Event,
     Membership,
     MemberRole,
     Organization,
+    Patient,
     Run,
     RunStatus,
     Session as AuthSession,
+    TreatmentRecord,
     UsageRecord,
     User,
 )
@@ -205,6 +209,46 @@ def record_usage(sess: Session, *, org_id: str, run_id: str | None = None, kind:
     sess.add(rec)
     sess.commit()
     return rec
+
+
+# ---- synthetic patient charts (EHR layer) -------------------------------------
+def list_patients(sess: Session, *, org_id: str) -> list[Patient]:
+    """The clinic org's patient roster, ordered by name."""
+    return list(sess.exec(
+        select(Patient).where(Patient.org_id == org_id).order_by(Patient.family_name, Patient.given_name)
+    ).all())
+
+
+def get_patient(sess: Session, *, org_id: str, patient_id: str) -> Patient | None:
+    """A patient, scoped to the owning org (tenant isolation)."""
+    p = sess.get(Patient, patient_id)
+    return p if (p is not None and p.org_id == org_id) else None
+
+
+def patient_coverage(sess: Session, patient_id: str) -> Coverage | None:
+    return sess.exec(select(Coverage).where(Coverage.patient_id == patient_id)).first()
+
+
+def patient_conditions(sess: Session, patient_id: str) -> list[Condition]:
+    return list(sess.exec(select(Condition).where(Condition.patient_id == patient_id)).all())
+
+
+def patient_treatments(sess: Session, patient_id: str) -> list[TreatmentRecord]:
+    return list(sess.exec(select(TreatmentRecord).where(TreatmentRecord.patient_id == patient_id)).all())
+
+
+def patient_runs(sess: Session, patient_id: str) -> list[Run]:
+    """Prior-auth cases linked to a patient, newest first."""
+    return list(sess.exec(
+        select(Run).where(Run.patient_id == patient_id).order_by(Run.started_at.desc())
+    ).all())
+
+
+def coverage_summary(cov: Coverage | None) -> str:
+    """A one-line eligibility summary the provider Eligibility agent cites (270/271-style)."""
+    if cov is None:
+        return ""
+    return f"{cov.payer_name} — {cov.plan_type}, member {cov.member_id} ({cov.status})"
 
 
 def finish_run(sess: Session, *, run: Run, status: str = RunStatus.SUCCEEDED.value,

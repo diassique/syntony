@@ -117,6 +117,11 @@ def seed_demo(sess: Session, *, password: str | None = None) -> dict:
         _ensure_project(sess, org=org)
         has_cred = _ensure_credential(sess, org=org, side=side, env_prefix=acc["env_prefix"], kind=acc["cred_kind"])
         summary[side] = {"org_id": org.id, "slug": org.slug, "email": acc["email"], "credential": has_cred}
+    # Curated synthetic patient roster lives on the provider (clinic) org.
+    from .seed_patients import seed_patients
+    provider_org_id = summary.get("provider", {}).get("org_id")
+    if provider_org_id:
+        summary["patients"] = {"created": seed_patients(sess, clinic_org_id=provider_org_id)}
     return summary
 
 
@@ -138,6 +143,9 @@ def main() -> None:
     pw = os.environ.get("SYNTONY_DEMO_PASSWORD", DEFAULT_PASSWORD)
     print("Seeded demo orgs:")
     for side, info in summary.items():
+        if side == "patients":
+            print(f"  patients  roster on clinic org ({info['created']} created)")
+            continue
         cred = "✓ band key" if info["credential"] else "— no band key in env"
         print(f"  {side:9} {info['email']:22} org={info['slug']:18} {cred}")
     print(f"\nLogin password for all demo accounts: {pw!r}")

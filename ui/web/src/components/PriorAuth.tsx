@@ -13,11 +13,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FilePlus2, Inbox, ArrowLeft, Plus, X, Check, ShieldCheck, ShieldAlert, Clock,
   Stethoscope, Gavel, Send, RotateCcw, FileSearch, AlertTriangle, Loader2, CheckCircle2,
+  Users,
 } from 'lucide-react'
 import {
-  paApi, PA_STATUS_LABEL,
+  paApi, patientsApi, PA_STATUS_LABEL,
   type PaOptions, type PrecheckReport, type PaSummary, type PaDetail, type PaForm,
-  type PaTimelineItem,
+  type PaTimelineItem, type PatientSummary, type PatientChart,
 } from '../api'
 import { Badge, Button, Input, Select, type BadgeTone } from './ui'
 
@@ -132,8 +133,10 @@ function toForm(f: FormState): PaForm {
   }
 }
 
-export function PaSubmit({ onSubmitted }: { onSubmitted: (runId: string) => void }) {
+export function PaSubmit({ onSubmitted, initialPatientId }: { onSubmitted: (runId: string) => void; initialPatientId?: string | null }) {
   const [opts, setOpts] = useState<PaOptions | null>(null)
+  const [roster, setRoster] = useState<PatientSummary[]>([])
+  const [patientId, setPatientId] = useState<string>('')
   const [f, setF] = useState<FormState>(EMPTY_FORM)
   const [report, setReport] = useState<PrecheckReport | null>(null)
   const [checking, setChecking] = useState(false)
@@ -142,6 +145,26 @@ export function PaSubmit({ onSubmitted }: { onSubmitted: (runId: string) => void
   const seq = useRef(0)
 
   useEffect(() => { paApi.options().then(setOpts).catch(() => {}) }, [])
+  useEffect(() => { patientsApi.list().then((r) => setRoster(r.patients)).catch(() => {}) }, [])
+
+  // Pull a chart and auto-fill the request (demographics + coverage + problem list + on-file docs).
+  const pickPatient = (id: string) => {
+    setPatientId(id)
+    if (!id) return
+    patientsApi.get(id).then((c: PatientChart) => {
+      setF((p) => ({
+        ...p,
+        patient_ref: c.patient.mrn,
+        member_id: c.coverage?.member_id ?? '',
+        health_plan: c.coverage?.plan_type ?? p.health_plan,
+        diagnoses: c.conditions.length
+          ? c.conditions.map((x) => ({ code: x.code, display: x.display }))
+          : [{ code: '', display: '' }],
+        supporting_docs: Array.from(new Set(c.treatments.map((t) => t.doc_token).filter(Boolean))),
+      }))
+    }).catch(() => {})
+  }
+  useEffect(() => { if (initialPatientId) pickPatient(initialPatientId) }, [initialPatientId])
 
   // Live pre-check: debounce edits, then run Counsel's completeness/coding/policy check.
   useEffect(() => {
@@ -168,7 +191,7 @@ export function PaSubmit({ onSubmitted }: { onSubmitted: (runId: string) => void
   const submit = async () => {
     setSubmitting(true); setError(null)
     try {
-      const { run_id } = await paApi.submit(toForm(f))
+      const { run_id } = await paApi.submit(toForm(f), patientId || null)
       onSubmitted(run_id)
     } catch (e) {
       setError(String((e as Error)?.message || e))
@@ -186,6 +209,19 @@ export function PaSubmit({ onSubmitted }: { onSubmitted: (runId: string) => void
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="space-y-6">
+          {/* Patient from chart */}
+          <Card title="Patient from chart" right={
+            <Select aria-label="Pick a patient" size="sm" value={patientId} placeholder="Pick a patient…"
+              onValueChange={pickPatient}
+              options={roster.map((p) => ({ label: `${p.name} · ${p.mrn}${p.coverage ? ` · ${p.coverage.plan_type}` : ''}`, value: p.id }))} />
+          }>
+            <p className="text-[13px] text-ink-soft">
+              {patientId
+                ? 'Chart loaded — demographics, coverage, problem list and on-file documents pre-filled below. Order the service and sign.'
+                : 'Pick a patient to auto-fill from their chart, or fill the request manually.'}
+            </p>
+          </Card>
+
           {/* Patient + coverage */}
           <Card title="Patient & coverage">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -716,6 +752,132 @@ function Timeline({ items }: { items: PaTimelineItem[] }) {
         })}
       </ol>
     </section>
+  )
+}
+
+// ================================================================================
+//  PatientsView — the clinic's synthetic roster + chart + PA history
+// ================================================================================
+
+export function PatientsView({ onOpenCase, onNewRequest }: { onOpenCase: (runId: string) => void; onNewRequest: (patientId: string) => void }) {
+  const [roster, setRoster] = useState<PatientSummary[] | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
+  useEffect(() => { patientsApi.list().then((r) => setRoster(r.patients)).catch(() => {}) }, [])
+
+  if (openId) return <PatientChartView id={openId} onBack={() => setOpenId(null)} onOpenCase={onOpenCase} onNewRequest={onNewRequest} />
+
+  return (
+    <div>
+      <SectionTitle icon={<Users size={22} strokeWidth={1.75} />} title="Patients"
+        subtitle="Synthetic clinic roster (no real PHI). Open a chart for coverage, problem list, prior care, and PA history." />
+      {roster === null ? <p className="text-[13px] text-ink-faint">Loading…</p> : roster.length === 0 ? (
+        <div className="rounded-md border border-dashed border-line bg-paper/60 p-10 text-center text-[14px] text-ink-soft">
+          No patients on this organization's roster.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-md border border-line">
+          {roster.map((p, i) => (
+            <button key={p.id} onClick={() => setOpenId(p.id)}
+              className={`flex w-full items-center gap-4 bg-paper px-4 py-3 text-left transition-colors hover:bg-sunk/60 ${i > 0 ? 'border-t border-line' : ''}`}>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pine/10 font-mono text-[11px] font-bold text-pine ring-1 ring-pine/20">
+                {p.name.split(' ').map((x) => x[0]).slice(0, 2).join('')}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14px] font-medium text-ink">{p.name}</p>
+                <p className="truncate font-mono text-[11px] text-ink-faint">{p.mrn} · DOB {p.dob} · {p.sex}</p>
+              </div>
+              {p.coverage && <Badge tone="ink">{p.coverage.plan_type}</Badge>}
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{p.conditions} dx</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PatientChartView({ id, onBack, onOpenCase, onNewRequest }: {
+  id: string; onBack: () => void; onOpenCase: (runId: string) => void; onNewRequest: (patientId: string) => void
+}) {
+  const [c, setC] = useState<PatientChart | null>(null)
+  useEffect(() => { patientsApi.get(id).then(setC).catch(() => {}) }, [id])
+  if (!c) return <p className="text-[13px] text-ink-faint">Loading…</p>
+  const p = c.patient
+
+  return (
+    <div>
+      <button onClick={onBack} className="mb-4 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-faint hover:text-ink">
+        <ArrowLeft size={13} strokeWidth={1.75} /> Patients
+      </button>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-[20px] font-semibold tracking-tight text-ink">{p.name}</h1>
+          <p className="mt-0.5 font-mono text-[12px] text-ink-faint">{p.mrn} · DOB {p.dob} · {p.sex}{p.address ? ` · ${p.address}` : ''}</p>
+        </div>
+        <Button size="sm" leadingIcon={<FilePlus2 size={14} strokeWidth={1.75} />} onClick={() => onNewRequest(id)}>New PA request</Button>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="space-y-6">
+          <Card title="Coverage (eligibility)">
+            {c.coverage ? (
+              <dl className="space-y-2 text-[13px]">
+                <Row k="Payer" v={c.coverage.payer} />
+                <Row k="Plan" v={c.coverage.plan_type} />
+                <Row k="Member ID" v={c.coverage.member_id} />
+                <Row k="Group" v={c.coverage.group_number || '—'} />
+                <Row k="Status" v={c.coverage.status} />
+                <Row k="Period" v={[c.coverage.period_start, c.coverage.period_end].filter(Boolean).join(' → ') || '—'} />
+              </dl>
+            ) : <p className="text-[13px] text-ink-faint">No coverage on file.</p>}
+          </Card>
+
+          <Card title="Problem list (ICD-10)">
+            {c.conditions.length === 0 ? <p className="text-[13px] text-ink-faint">None.</p> : (
+              <ul className="space-y-2 text-[13px]">
+                {c.conditions.map((x, k) => (
+                  <li key={k} className="flex items-center gap-2"><Badge tone="neutral">{x.code}</Badge><span className="text-ink">{x.display}</span></li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card title="Documented prior care">
+            {c.treatments.length === 0 ? <p className="text-[13px] text-ink-faint">None on file.</p> : (
+              <ul className="space-y-3 text-[13px]">
+                {c.treatments.map((t, k) => (
+                  <li key={k} className="border-l-2 border-line pl-3">
+                    <div className="flex items-center gap-2">
+                      <Badge tone="pine">{t.doc_token}</Badge>
+                      {t.date && <span className="font-mono text-[10px] text-ink-faint">{t.date}</span>}
+                      {t.outcome && <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{t.outcome}</span>}
+                    </div>
+                    <p className="mt-0.5 text-ink-soft">{t.description}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+
+        <div className="lg:sticky lg:top-8 lg:self-start">
+          <div className="rounded-md border border-line bg-paper p-5">
+            <h2 className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">Prior-auth history</h2>
+            {c.cases.length === 0 ? <p className="text-[13px] text-ink-faint">No PA cases yet.</p> : (
+              <div className="space-y-2">
+                {c.cases.map((r) => (
+                  <button key={r.run_id} onClick={() => onOpenCase(r.run_id)}
+                    className="flex w-full items-center gap-2 rounded-sm border border-line bg-bone/40 px-3 py-2 text-left text-[12px] hover:border-pine/30">
+                    <span className="min-w-0 flex-1 truncate text-ink">{r.case || 'PA case'}</span>
+                    <StatusBadge status={r.status} outcome={r.outcome} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

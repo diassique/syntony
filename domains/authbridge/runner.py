@@ -118,6 +118,7 @@ class AuthBridgeState:
     committed_turns: int = 0           # audit turn offset across resumed segments
     recommendation: dict = field(default_factory=dict)  # UM recommendation surfaced to the payer
     auth_number: str = ""              # issued on APPROVE (HCR02 analogue)
+    coverage_summary: str = ""         # real Coverage (plan + member id), cited by the eligibility step
 
 
 @dataclass(frozen=True)
@@ -309,10 +310,13 @@ def plan(state: State, st: AuthBridgeState) -> _Plan | None:
         # Provider Eligibility & Benefits verifies coverage before anything goes to the payer.
         if not st.eligibility_checked:
             st.eligibility_checked = True
+            facts = (f"Verified eligibility — {st.coverage_summary}. The service is a covered benefit "
+                     "requiring prior authorization; no eligibility blocks."
+                     if st.coverage_summary else
+                     "Verified active coverage and that the service is a covered benefit requiring prior "
+                     "authorization — no eligibility blocks.")
             return _Plan(
-                "provider.eligibility", Kind.INFO_RESPONSE, State.INFO,
-                "Verified active coverage and that the service is a covered benefit requiring prior "
-                "authorization — no eligibility blocks.",
+                "provider.eligibility", Kind.INFO_RESPONSE, State.INFO, facts,
                 mentions=("provider.counsel",), pa_event="ELIGIBILITY_VERIFIED",
             )
         return None  # PROPOSE is transient; Counsel submits from INFO

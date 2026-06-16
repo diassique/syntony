@@ -276,7 +276,8 @@ export type PaForm = Record<string, unknown>
 export const paApi = {
   options: () => request<PaOptions>('/api/pa/options', { auth: true }),
   precheck: (form: PaForm) => request<PrecheckReport>('/api/pa/precheck', { method: 'POST', auth: true, body: { form } }),
-  submit: (form: PaForm) => request<{ run_id: string; status: string }>('/api/pa/submit', { method: 'POST', auth: true, body: { form } }),
+  submit: (form: PaForm, patientId?: string | null) =>
+    request<{ run_id: string; status: string }>('/api/pa/submit', { method: 'POST', auth: true, body: { form, patient_id: patientId ?? null } }),
   worklist: () => request<{ items: PaSummary[] }>('/api/pa/worklist', { auth: true }),
   get: (id: string) => request<PaDetail>(`/api/pa/${id}`, { auth: true }),
   review: (id: string) => request<{ status: string }>(`/api/pa/${id}/review`, { method: 'POST', auth: true }),
@@ -287,6 +288,31 @@ export const paApi = {
   accept: (id: string) => request<{ status: string }>(`/api/pa/${id}/accept`, { method: 'POST', auth: true }),
   mdDecide: (id: string, outcome: 'APPROVE' | 'DENY', note = '') =>
     request<{ status: string }>(`/api/pa/${id}/md-decide`, { method: 'POST', auth: true, body: { outcome, note } }),
+}
+
+// ---- synthetic patient charts (clinic EHR roster) ----
+
+export interface PatientSummary {
+  id: string
+  mrn: string
+  name: string
+  dob: string
+  sex: string
+  conditions: number
+  coverage: { payer: string; plan_type: string; member_id: string; status: string } | null
+}
+
+export interface PatientChart {
+  patient: { id: string; mrn: string; given_name: string; family_name: string; name: string; dob: string; sex: string; address: string; phone: string }
+  coverage: { payer: string; plan_type: string; member_id: string; group_number: string; status: string; period_start: string; period_end: string } | null
+  conditions: { system: string; code: string; display: string; status: string; onset: string }[]
+  treatments: { kind: string; doc_token: string; description: string; date: string; outcome: string }[]
+  cases: { run_id: string; case: string; status: string; outcome: string | null; urgency: string | null; started_at: string | null }[]
+}
+
+export const patientsApi = {
+  list: () => request<{ patients: PatientSummary[] }>('/api/patients', { auth: true }),
+  get: (id: string) => request<PatientChart>(`/api/patients/${id}`, { auth: true }),
 }
 
 /** Human label for a workflow status. */

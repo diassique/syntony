@@ -187,9 +187,10 @@ def sla_deadline(started_at: datetime, urgency: str | None) -> datetime:
 
 # ---- working-state (de)serialization -------------------------------------------
 
-def new_state(req: PriorAuthRequest, *, criteria: str = "") -> AuthBridgeState:
+def new_state(req: PriorAuthRequest, *, criteria: str = "", coverage_summary: str = "") -> AuthBridgeState:
     """A fresh interactive working state for a just-submitted request."""
-    return AuthBridgeState(req=req, interactive=True, retrieved_criteria=criteria)
+    return AuthBridgeState(req=req, interactive=True, retrieved_criteria=criteria,
+                           coverage_summary=coverage_summary)
 
 
 def dump_state(st: AuthBridgeState) -> dict:
@@ -225,6 +226,7 @@ def dump_state(st: AuthBridgeState) -> dict:
         "committed_turns": st.committed_turns,
         "recommendation": st.recommendation,
         "auth_number": st.auth_number,
+        "coverage_summary": st.coverage_summary,
     }
 
 
@@ -264,6 +266,7 @@ def load_state(d: dict) -> AuthBridgeState:
         committed_turns=d.get("committed_turns", 0),
         recommendation=d.get("recommendation", {}),
         auth_number=d.get("auth_number", ""),
+        coverage_summary=d.get("coverage_summary", ""),
     )
 
 

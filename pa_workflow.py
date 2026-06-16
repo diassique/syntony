@@ -181,17 +181,28 @@ def _resolve_sides(sess, submitter_org: str) -> dict[str, str]:
 
 # ---- public actions (one per API endpoint) -------------------------------------
 
-async def submit_request(form: dict, *, submitter_org: str, full: bool = False) -> dict:
+async def submit_request(form: dict, *, submitter_org: str, patient_id: str | None = None,
+                         full: bool = False) -> dict:
     """Provider submits a PA request: build + validate, open the interactive run, and run the
     provider-side segment (intake → eligibility → Counsel completeness → submit) which parks
-    the case in the payer's worklist (AWAITING_PAYER)."""
+    the case in the payer's worklist (AWAITING_PAYER).
+
+    When ``patient_id`` is given (the request was assembled from a chart), the run is linked to
+    the patient and the eligibility step cites the patient's real Coverage."""
     req = wf.build_request(form)
     criteria = await _retrieve_criteria(req)
-    st = wf.new_state(req, criteria=criteria)
     with open_session() as sess:
         sides = _resolve_sides(sess, submitter_org)
+        cover = ""
+        if patient_id:
+            patient = service.get_patient(sess, org_id=sides["provider"], patient_id=patient_id)
+            if patient is None:
+                raise ValueError("patient not found on this organization's roster")
+            cover = service.coverage_summary(service.patient_coverage(sess, patient_id))
+        st = wf.new_state(req, criteria=criteria, coverage_summary=cover)
         run = service.start_run(sess, org_id=sides["provider"], case_name=_case_label(req))
         run.mode = RunMode.INTERACTIVE.value
+        run.patient_id = patient_id
         run.urgency = "expedited" if req.urgency is Urgency.URGENT else "standard"
         run.workflow = {"side_to_org": sides, "state": wf.dump_state(st), "fsm_state": State.FRAME.value}
         sess.add(run)
