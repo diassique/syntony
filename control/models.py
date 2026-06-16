@@ -265,6 +265,29 @@ class Condition(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
 
 
+class DocType(SQLModel, table=True):
+    """Reference catalog of supporting-document types a PA request can attach (the form's
+    checklist). ``token`` is the machine id the policy matches; ``label`` is the UI text.
+    Global reference data — seeded from code, served from the DB."""
+
+    __tablename__ = "doc_types"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    token: str = Field(index=True, unique=True)
+    label: str = ""
+    sort_order: int = 0
+
+
+class Procedure(SQLModel, table=True):
+    """Reference catalog of known procedures (the form's quick-fill list). Global reference data."""
+
+    __tablename__ = "procedures"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    system: str = "CPT"          # CPT | HCPCS
+    code: str = Field(index=True)
+    display: str = ""
+    sort_order: int = 0
+
+
 class GoldCard(SQLModel, table=True):
     """A provider gold-card exemption: a provider with a strong approval record for a service is
     exempted from prior auth for it (modeled on Texas HB 3459/3812 — ≥90% approvals, ≥5 requests).

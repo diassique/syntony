@@ -344,9 +344,22 @@ class PrecheckIn(BaseModel):
 @app.post("/api/pa/options")
 @app.get("/api/pa/options")
 def pa_options(_user=Depends(current_user)) -> JSONResponse:
-    """Form catalogs: supporting-doc types, known procedures, denial-reason enum."""
+    """Form catalogs: supporting-doc types + known procedures (served from the DB), and the
+    denial-reason enum. Falls back to the domain defaults if the catalogs aren't seeded yet."""
     from domains.authbridge import workflow as wf
-    return JSONResponse(wf.doc_options())
+    from domains.authbridge.policy import DenialReason
+    from control.db import session as open_session
+    from control import service
+    with open_session() as sess:
+        docs = service.list_doc_types(sess)
+        procs = service.list_procedures(sess)
+    if docs or procs:
+        return JSONResponse({
+            "supporting_doc_types": [{"id": d.token, "label": d.label} for d in docs],
+            "known_procedures": [{"system": p.system, "code": p.code, "display": p.display} for p in procs],
+            "denial_reasons": [r.value for r in DenialReason],
+        })
+    return JSONResponse(wf.doc_options())  # fallback: catalogs not seeded
 
 
 @app.post("/api/pa/precheck")

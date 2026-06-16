@@ -107,6 +107,22 @@ def _ensure_credential(sess: Session, *, org: Organization, side: str, env_prefi
     return True
 
 
+def seed_refdata(sess: Session) -> dict:
+    """Seed the global reference catalogs (doc types, known procedures) from the domain constants.
+    Idempotent — keyed by token/code. Served from the DB thereafter."""
+    from .models import DocType, Procedure
+    from domains.authbridge.workflow import SUPPORTING_DOC_TYPES, KNOWN_PROCEDURES
+    n_docs = n_proc = 0
+    for i, d in enumerate(SUPPORTING_DOC_TYPES):
+        if sess.exec(select(DocType).where(DocType.token == d["id"])).first() is None:
+            sess.add(DocType(token=d["id"], label=d["label"], sort_order=i)); n_docs += 1
+    for i, p in enumerate(KNOWN_PROCEDURES):
+        if sess.exec(select(Procedure).where(Procedure.code == p["code"])).first() is None:
+            sess.add(Procedure(system=p["system"], code=p["code"], display=p["display"], sort_order=i)); n_proc += 1
+    sess.commit()
+    return {"doc_types": n_docs, "procedures": n_proc}
+
+
 def seed_demo(sess: Session, *, password: str | None = None) -> dict:
     """Create/repair the two demo orgs. Returns a summary (slugs, org ids, which creds were stored)."""
     pw = password or os.environ.get("SYNTONY_DEMO_PASSWORD", DEFAULT_PASSWORD)
@@ -117,6 +133,7 @@ def seed_demo(sess: Session, *, password: str | None = None) -> dict:
         _ensure_project(sess, org=org)
         has_cred = _ensure_credential(sess, org=org, side=side, env_prefix=acc["env_prefix"], kind=acc["cred_kind"])
         summary[side] = {"org_id": org.id, "slug": org.slug, "email": acc["email"], "credential": has_cred}
+    summary["refdata"] = seed_refdata(sess)  # global reference catalogs
     # Curated synthetic patient roster lives on the provider (clinic) org.
     from .seed_patients import seed_patients
     from . import service
@@ -153,6 +170,9 @@ def main() -> None:
     for side, info in summary.items():
         if side == "patients":
             print(f"  patients  roster on clinic org ({info['created']} created)")
+            continue
+        if side == "refdata":
+            print(f"  refdata   catalogs ({info['doc_types']} doc types, {info['procedures']} procedures)")
             continue
         cred = "✓ band key" if info["credential"] else "— no band key in env"
         print(f"  {side:9} {info['email']:22} org={info['slug']:18} {cred}")

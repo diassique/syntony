@@ -18,8 +18,10 @@ from .models import (
     Condition,
     Coverage,
     Credential,
+    DocType,
     Event,
     GoldCard,
+    Procedure,
     Membership,
     MemberRole,
     Organization,
@@ -250,6 +252,15 @@ def coverage_summary(cov: Coverage | None) -> str:
     if cov is None:
         return ""
     return f"{cov.payer_name} — {cov.plan_type}, member {cov.member_id} ({cov.status})"
+
+
+# ---- reference catalogs (served from the DB, seeded from code) -----------------
+def list_doc_types(sess: Session) -> list[DocType]:
+    return list(sess.exec(select(DocType).order_by(DocType.sort_order)).all())
+
+
+def list_procedures(sess: Session) -> list[Procedure]:
+    return list(sess.exec(select(Procedure).order_by(Procedure.sort_order)).all())
 
 
 # ---- gold carding (provider PA exemption; Texas HB 3459/3812) ------------------
