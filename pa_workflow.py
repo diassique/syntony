@@ -63,9 +63,11 @@ def _case_label(req) -> str:
 async def _retrieve_criteria(req) -> str:
     try:
         from domains.authbridge.criteria import retrieve
+        with open_session() as sess:
+            corpus = service.criteria_corpus(sess) or None  # DB-backed; None → built-in fallback
         query = (f"{req.procedure.display} (code {req.procedure.code}); "
                  f"diagnoses {[d.code for d in req.diagnoses]}")
-        hits = await asyncio.to_thread(retrieve, query, 1)
+        hits = await asyncio.to_thread(retrieve, query, 1, corpus)
         return hits[0][1] if hits else ""
     except Exception as e:  # noqa: BLE001 — RAG is optional
         log.info("pa_workflow: criteria retrieval skipped (%s: %s)", type(e).__name__, str(e)[:100])

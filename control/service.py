@@ -263,6 +263,14 @@ def list_procedures(sess: Session) -> list[Procedure]:
     return list(sess.exec(select(Procedure).order_by(Procedure.sort_order)).all())
 
 
+def criteria_corpus(sess: Session) -> list[dict[str, str]]:
+    """The medical-necessity criteria corpus in retrieve()'s shape ({"id","text"}). Empty list
+    if unseeded — the caller then falls back to the built-in corpus."""
+    from .models import Criterion
+    rows = sess.exec(select(Criterion).order_by(Criterion.sort_order)).all()
+    return [{"id": c.slug, "text": c.text} for c in rows]
+
+
 # ---- gold carding (provider PA exemption; Texas HB 3459/3812) ------------------
 GOLD_MIN_TOTAL = 5      # minimum decided requests to qualify
 GOLD_MIN_RATE = 0.9     # ≥90% approvals

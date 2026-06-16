@@ -134,9 +134,11 @@ async def execute_live_run(run_id: str, case_name: str, *, request=None, full: b
     criteria = ""
     try:
         from domains.authbridge.criteria import retrieve
+        with open_session() as sess:
+            corpus = service.criteria_corpus(sess) or None  # DB-backed; None → built-in fallback
         src = request if request is not None else ALL_CASES[case_name]()
         query = f"{src.procedure.display} (code {src.procedure.code}); diagnoses {[d.code for d in src.diagnoses]}"
-        hits = await asyncio.to_thread(retrieve, query, 1)
+        hits = await asyncio.to_thread(retrieve, query, 1, corpus)
         criteria = hits[0][1] if hits else ""
     except Exception as e:  # noqa: BLE001 — retrieval is optional
         print(f"live_run: criteria retrieval skipped ({type(e).__name__}: {str(e)[:100]})")

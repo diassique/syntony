@@ -41,7 +41,9 @@ CRITERIA: list[dict[str, str]] = [
         "by the applicable medical-necessity policy.")},
 ]
 
-_cache: list[tuple[dict[str, str], list[float]]] | None = None
+#: Embedding cache keyed by the corpus signature (tuple of ids), so a DB-loaded corpus and the
+#: built-in one are cached independently and re-embed only when the set of criteria changes.
+_cache: dict[tuple[str, ...], list[tuple[dict[str, str], list[float]]]] = {}
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -51,18 +53,19 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-def retrieve(query: str, k: int = 1) -> list[tuple[str, str, float]]:
+def retrieve(query: str, k: int = 1, corpus: list[dict[str, str]] | None = None) -> list[tuple[str, str, float]]:
     """Return the top-``k`` (id, text, score) criteria most similar to ``query`` via embeddings.
 
-    Embeds the corpus once (cached) + the query each call. Raises if embeddings are
-    unavailable — callers treat retrieval as best-effort and fall back.
+    ``corpus`` is a list of ``{"id", "text"}`` (the DB-backed criteria); defaults to the built-in
+    ``CRITERIA`` when not supplied. The corpus is embedded once per signature (cached) + the query
+    each call. Raises if embeddings are unavailable — callers treat retrieval as best-effort.
     """
-    global _cache
     from engine.llm import embed
 
-    if _cache is None:
-        vectors = embed([c["text"] for c in CRITERIA])
-        _cache = list(zip(CRITERIA, vectors))
+    items = corpus if corpus else CRITERIA
+    key = tuple(c["id"] for c in items)
+    if key not in _cache:
+        _cache[key] = list(zip(items, embed([c["text"] for c in items])))
     qv = embed(query)[0]
-    scored = sorted(((_cosine(qv, v), c) for c, v in _cache), key=lambda t: -t[0])
+    scored = sorted(((_cosine(qv, v), c) for c, v in _cache[key]), key=lambda t: -t[0])
     return [(c["id"], c["text"], score) for score, c in scored[:k]]

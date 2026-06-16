@@ -277,6 +277,17 @@ class DocType(SQLModel, table=True):
     sort_order: int = 0
 
 
+class Criterion(SQLModel, table=True):
+    """A medical-necessity criterion (MCG/InterQual-style) the Clinical Guidelines agent retrieves
+    via embeddings and cites. Editable reference content — seeded from code, served from the DB."""
+
+    __tablename__ = "criteria"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    slug: str = Field(index=True, unique=True)
+    text: str = ""
+    sort_order: int = 0
+
+
 class Procedure(SQLModel, table=True):
     """Reference catalog of known procedures (the form's quick-fill list). Global reference data."""
 

@@ -32,7 +32,7 @@ def test_seed_refdata_populates_and_is_idempotent(sess):
     assert first["doc_types"] == len(SUPPORTING_DOC_TYPES)
     assert first["procedures"] == len(KNOWN_PROCEDURES)
     again = seed.seed_refdata(sess)  # idempotent — nothing new the second time
-    assert again == {"doc_types": 0, "procedures": 0}
+    assert again == {"doc_types": 0, "procedures": 0, "criteria": 0}
 
 
 def test_catalogs_served_from_db_match_the_seed(sess):
@@ -41,3 +41,20 @@ def test_catalogs_served_from_db_match_the_seed(sess):
     assert tokens == {d["id"] for d in SUPPORTING_DOC_TYPES}
     codes = [p.code for p in service.list_procedures(sess)]
     assert codes == [p["code"] for p in KNOWN_PROCEDURES]  # sort_order preserved
+
+
+def test_criteria_corpus_seeds_and_retrieves_from_db(sess, monkeypatch):
+    from domains.authbridge.criteria import CRITERIA, retrieve
+    seed.seed_refdata(sess)
+    corpus = service.criteria_corpus(sess)
+    assert [c["id"] for c in corpus] == [c["id"] for c in CRITERIA]
+
+    # offline embedding stub: identical text → identical vector (cosine 1)
+    def fake_embed(x):
+        items = x if isinstance(x, list) else [x]
+        return [[float(sum(ord(ch) for ch in t) % 97), float(len(t))] for t in items]
+    monkeypatch.setattr("engine.llm.embed", fake_embed)
+
+    target = corpus[2]  # step-therapy biologic
+    hits = retrieve(target["text"], 1, corpus)
+    assert hits[0][0] == target["id"]  # the DB-backed corpus drove retrieval

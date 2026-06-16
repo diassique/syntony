@@ -110,17 +110,21 @@ def _ensure_credential(sess: Session, *, org: Organization, side: str, env_prefi
 def seed_refdata(sess: Session) -> dict:
     """Seed the global reference catalogs (doc types, known procedures) from the domain constants.
     Idempotent — keyed by token/code. Served from the DB thereafter."""
-    from .models import DocType, Procedure
+    from .models import Criterion, DocType, Procedure
     from domains.authbridge.workflow import SUPPORTING_DOC_TYPES, KNOWN_PROCEDURES
-    n_docs = n_proc = 0
+    from domains.authbridge.criteria import CRITERIA
+    n_docs = n_proc = n_crit = 0
     for i, d in enumerate(SUPPORTING_DOC_TYPES):
         if sess.exec(select(DocType).where(DocType.token == d["id"])).first() is None:
             sess.add(DocType(token=d["id"], label=d["label"], sort_order=i)); n_docs += 1
     for i, p in enumerate(KNOWN_PROCEDURES):
         if sess.exec(select(Procedure).where(Procedure.code == p["code"])).first() is None:
             sess.add(Procedure(system=p["system"], code=p["code"], display=p["display"], sort_order=i)); n_proc += 1
+    for i, c in enumerate(CRITERIA):
+        if sess.exec(select(Criterion).where(Criterion.slug == c["id"])).first() is None:
+            sess.add(Criterion(slug=c["id"], text=c["text"], sort_order=i)); n_crit += 1
     sess.commit()
-    return {"doc_types": n_docs, "procedures": n_proc}
+    return {"doc_types": n_docs, "procedures": n_proc, "criteria": n_crit}
 
 
 def seed_demo(sess: Session, *, password: str | None = None) -> dict:
@@ -172,7 +176,8 @@ def main() -> None:
             print(f"  patients  roster on clinic org ({info['created']} created)")
             continue
         if side == "refdata":
-            print(f"  refdata   catalogs ({info['doc_types']} doc types, {info['procedures']} procedures)")
+            print(f"  refdata   catalogs ({info['doc_types']} doc types, {info['procedures']} procedures, "
+                  f"{info['criteria']} criteria)")
             continue
         cred = "✓ band key" if info["credential"] else "— no band key in env"
         print(f"  {side:9} {info['email']:22} org={info['slug']:18} {cred}")
