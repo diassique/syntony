@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 
 from engine.coordinator import CaseContext, Move
 from engine.frameworks import turn_fn
-from engine.llm import LLMConfig, completion_kwargs, looks_like_blob, make_client
+from engine.llm import LLMConfig, completion_kwargs, looks_like_blob, make_client, stream_chat
 from protocol import Envelope, Kind, State, Visibility
 
 from .policy import (
@@ -565,8 +565,11 @@ def llm_narrator(*, debug: bool = True, downshift: str | None = None) -> Narrato
                 # model occasionally packs an envelope into the field) — no length cap on clean prose.
                 msg = (out.get("message") or "").strip()
                 if msg and not looks_like_blob(msg):
-                    # `via` records the path that actually produced this turn (provenance).
-                    return {"message": msg, "reasoning": out.get("reasoning") or msg, "via": spec.framework.value}
+                    # `via` records the path that actually produced this turn (provenance); `model`
+                    # + token counts feed the AI/ML usage telemetry (served via the AI/ML gateway).
+                    return {"message": msg, "reasoning": out.get("reasoning") or msg,
+                            "via": spec.framework.value, "model": cfg.model,
+                            "tokens_in": out.get("tokens_in", 0), "tokens_out": out.get("tokens_out", 0)}
                 log.warning("narrator: %s %s output unusable → gateway", role_id, spec.framework.value)
             except Exception as e:  # noqa: BLE001 — framework hiccup → fall back to the gateway
                 log.warning("narrator: %s %s failed → gateway: %s: %s",
@@ -577,8 +580,10 @@ def llm_narrator(*, debug: bool = True, downshift: str | None = None) -> Narrato
                 cfg, [{"role": "system", "content": spec.system_prompt}, {"role": "user", "content": user}]
             )
             kwargs["max_tokens"] = 400
-            resp = _client(cfg).chat.completions.create(**kwargs)
-            return {**_parse_turn(resp.choices[0].message.content or "", fallback=facts), "via": "aiml-gateway"}
+            # Stream the gateway turn (genuine use of AI/ML streaming) + capture token usage.
+            text, (tin, tout) = stream_chat(_client(cfg), kwargs)
+            return {**_parse_turn(text, fallback=facts), "via": "aiml-gateway", "streamed": True,
+                    "model": cfg.model, "tokens_in": tin, "tokens_out": tout}
         except Exception:  # noqa: BLE001 — a provider/key/slug failure must never break the run
             # Graceful degradation: phrase deterministically (e.g. the LLM gateway is unavailable).
             return {"message": facts, "reasoning": facts, "via": "fallback"}
@@ -611,6 +616,13 @@ def build_runner(*, narrate: Narrator | None = None):
         payload["framework"] = spec.framework.value          # the role's declared framework
         if content.get("via"):
             payload["via"] = content["via"]                  # the path that actually produced the turn
+        if content.get("model"):
+            payload["model"] = content["model"]              # AI/ML gateway slug that served this turn
+        if content.get("streamed"):
+            payload["streamed"] = True                       # produced via the streaming gateway path
+        for tk in ("tokens_in", "tokens_out"):               # real token usage (AI/ML telemetry)
+            if content.get(tk):
+                payload[tk] = content[tk]
         if p.pa_event:
             payload["pa_event"] = p.pa_event
         if p.denial_reason:

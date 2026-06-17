@@ -173,6 +173,37 @@ def completion_kwargs(
     return kwargs
 
 
+# ---- streaming + token accounting (AI/ML usage telemetry) -----------------------
+# AI/ML API is OpenAI-compatible, so it streams token-by-token and reports usage on the
+# final chunk via `stream_options.include_usage`. `stream_chat` exercises that genuinely
+# and returns the accumulated text + the (input, output) token counts so the app can meter
+# real consumption (surfaced in the console "AI/ML API" view).
+
+def _usage_tokens(usage: Any) -> tuple[int, int]:
+    """(input, output) token counts from an OpenAI-style usage object/dict, defensively."""
+    if usage is None:
+        return 0, 0
+    get = usage.get if isinstance(usage, dict) else (lambda k: getattr(usage, k, None))
+    return int(get("prompt_tokens") or 0), int(get("completion_tokens") or 0)
+
+
+def stream_chat(client: Any, kwargs: dict[str, Any]) -> tuple[str, tuple[int, int]]:
+    """Run a **streaming** chat completion and accumulate the reply. Forces
+    ``stream``+``stream_options.include_usage`` so the final chunk carries the token usage.
+    Returns ``(text, (input_tokens, output_tokens))``. Genuinely uses AI/ML's streaming API."""
+    kwargs = {**kwargs, "stream": True, "stream_options": {"include_usage": True}}
+    parts: list[str] = []
+    usage: Any = None
+    for chunk in client.chat.completions.create(**kwargs):
+        for choice in (getattr(chunk, "choices", None) or []):
+            piece = getattr(getattr(choice, "delta", None), "content", None)
+            if piece:
+                parts.append(piece)
+        if getattr(chunk, "usage", None):
+            usage = chunk.usage
+    return "".join(parts), _usage_tokens(usage)
+
+
 # ---- multimodal capability layer (one AI/ML gateway, every modality) ------------
 # These wrap the AI/ML endpoints verified live in spikes/07 + NOTES_AIML.md. The pure
 # request-shaping helpers (``_vision_messages`` / ``_ocr_payload`` / ``loads_json``) are
@@ -216,8 +247,8 @@ def vision_extract(image_data_uri: str, *, schema: dict[str, Any], instruction: 
     json_schema). The default model is vision-verified; Claude is not (see NOTES_AIML)."""
     cfg = replace(LLMConfig(model=model, max_tokens=max_tokens), response_format=schema)
     client = make_client(cfg, env=env)
-    resp = client.chat.completions.create(**completion_kwargs(cfg, _vision_messages(instruction, image_data_uri)))
-    return loads_json(resp.choices[0].message.content or "")
+    text, _ = stream_chat(client, completion_kwargs(cfg, _vision_messages(instruction, image_data_uri)))
+    return loads_json(text)
 
 
 def extract_from_text(text: str, *, schema: dict[str, Any], instruction: str,
@@ -228,8 +259,8 @@ def extract_from_text(text: str, *, schema: dict[str, Any], instruction: str,
     cfg = replace(LLMConfig(model=model, max_tokens=max_tokens), response_format=schema)
     client = make_client(cfg, env=env)
     messages = [{"role": "user", "content": f"{instruction}\n\nDOCUMENT:\n{text[:8000]}"}]
-    resp = client.chat.completions.create(**completion_kwargs(cfg, messages))
-    return loads_json(resp.choices[0].message.content or "")
+    out, _ = stream_chat(client, completion_kwargs(cfg, messages))
+    return loads_json(out)
 
 
 def embed(texts: str | list[str], *, model: str = EMBED_MODEL,

@@ -111,6 +111,7 @@ class OrgOut(BaseModel):
     name: str
     slug: str
     plan: str
+    kind: str              # provider | payer — the console gates its sections on this
 
 
 class AuthOut(BaseModel):
@@ -124,7 +125,7 @@ def _org_out(sess: Session, org_id: str | None) -> OrgOut | None:
     if not org_id:
         return None
     org = sess.get(Organization, org_id)
-    return OrgOut(id=org.id, name=org.name, slug=org.slug, plan=org.plan) if org else None
+    return OrgOut(id=org.id, name=org.name, slug=org.slug, plan=org.plan, kind=org.kind) if org else None
 
 
 # ---- endpoints -----------------------------------------------------------------

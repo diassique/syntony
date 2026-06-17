@@ -60,6 +60,23 @@ def _clean(msg: str) -> str:
     return re.sub(r"^@[\w.]+:\s*", "", msg.strip())
 
 
+def _pydantic_ai_usage(result: Any) -> tuple[int, int]:
+    """(input, output) tokens from a Pydantic AI run result, across SDK versions. Best-effort."""
+    try:
+        u = result.usage()
+    except Exception:  # noqa: BLE001 — usage is telemetry, never break a turn over it
+        return 0, 0
+    tin = getattr(u, "input_tokens", None) or getattr(u, "request_tokens", None) or 0
+    tout = getattr(u, "output_tokens", None) or getattr(u, "response_tokens", None) or 0
+    return int(tin), int(tout)
+
+
+def _usage_metadata(resp: Any) -> tuple[int, int]:
+    """(input, output) tokens from a LangChain/ChatOpenAI response's usage_metadata. Best-effort."""
+    um = getattr(resp, "usage_metadata", None) or {}
+    return int(um.get("input_tokens", 0) or 0), int(um.get("output_tokens", 0) or 0)
+
+
 def pydantic_ai_turn(*, cfg: LLMConfig, system_prompt: str, user: str, max_tokens: int = 400) -> dict[str, Any]:
     """Produce a turn via a real Pydantic AI Agent, configured from ``cfg`` (AI/ML provider)."""
     from pydantic_ai import Agent
@@ -74,8 +91,10 @@ def pydantic_ai_turn(*, cfg: LLMConfig, system_prompt: str, user: str, max_token
     # provider rejects together with the forced tool-call structured output (output_type). Deep
     # reasoning isn't needed to phrase already-decided facts; reasoning_effort lives on the gateway path.
     agent = Agent(chat, output_type=_Turn, system_prompt=system_prompt, model_settings=settings)
-    out = _retry(lambda: agent.run_sync(user)).output
-    return {"message": _clean(out.message), "reasoning": out.reasoning}
+    result = _retry(lambda: agent.run_sync(user))
+    out = result.output
+    tin, tout = _pydantic_ai_usage(result)
+    return {"message": _clean(out.message), "reasoning": out.reasoning, "tokens_in": tin, "tokens_out": tout}
 
 
 def langgraph_turn(*, cfg: LLMConfig, system_prompt: str, user: str, max_tokens: int = 400) -> dict[str, Any]:
@@ -107,7 +126,9 @@ def langgraph_turn(*, cfg: LLMConfig, system_prompt: str, user: str, max_tokens:
         d = loads_json(content)
         if not d.get("message"):
             raise ValueError("LangGraph turn produced no message")
-        return {"out": {"message": _clean(str(d["message"])), "reasoning": str(d.get("reasoning") or d["message"])}}
+        tin, tout = _usage_metadata(resp)
+        return {"out": {"message": _clean(str(d["message"])), "reasoning": str(d.get("reasoning") or d["message"]),
+                        "tokens_in": tin, "tokens_out": tout}}
 
     graph = StateGraph(S)
     graph.add_node("reason", reason)

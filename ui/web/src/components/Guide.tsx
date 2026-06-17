@@ -7,7 +7,7 @@
 import {
   BookOpen, Users, Inbox, FilePlus2, FolderClosed, Boxes, BarChart3, Settings as SettingsIcon,
   Stethoscope, Gavel, RotateCcw, ShieldCheck, Lock, Clock, Play, FileSearch, ArrowRight, Award,
-  SlidersHorizontal,
+  SlidersHorizontal, Cpu,
 } from 'lucide-react'
 import { Badge, Button } from './ui'
 
@@ -81,14 +81,19 @@ export default function Guide({ onGo }: { onGo?: Go }) {
 
       {/* Nav map */}
       <Section icon={<FolderClosed size={16} strokeWidth={1.75} />} title="Where things live">
+        <p className="mb-3 text-[13px] text-ink-soft">
+          The console adapts to your side: a <strong>provider</strong> manages patients and files requests;
+          a <strong>payer</strong> reviews them and sets policy. Sections tagged below appear only for that role.
+        </p>
         <div className="grid gap-2 sm:grid-cols-2">
-          <NavRow icon={<Users size={14} strokeWidth={1.75} />} name="Patients" desc="Clinic roster + chart + each patient's PA history" />
-          <NavRow icon={<Inbox size={14} strokeWidth={1.75} />} name="Prior auth" desc="The worklist — cases needing your action surface on top" />
-          <NavRow icon={<FilePlus2 size={14} strokeWidth={1.75} />} name="New request" desc="The submission form with live Counsel pre-check" />
+          <NavRow icon={<Users size={14} strokeWidth={1.75} />} name="Patients" who="provider" desc="Clinic roster + chart + each patient's PA history" />
+          <NavRow icon={<Inbox size={14} strokeWidth={1.75} />} name="Prior auth / Review queue" desc="The worklist — provider: your requests; payer: cases to review. Action items on top." />
+          <NavRow icon={<FilePlus2 size={14} strokeWidth={1.75} />} name="New request" who="provider" desc="The submission form with live Counsel pre-check" />
           <NavRow icon={<FolderClosed size={14} strokeWidth={1.75} />} name="Cases" desc="Every negotiation (incl. Sample runs) + the two-lane Theater" />
           <NavRow icon={<Boxes size={14} strokeWidth={1.75} />} name="Agents" desc="The mesh roster — roles, frameworks, models" />
           <NavRow icon={<BarChart3 size={14} strokeWidth={1.75} />} name="Insights" desc="Outcomes, overturns, turnaround, SLA, denial mix" />
-          <NavRow icon={<SlidersHorizontal size={14} strokeWidth={1.75} />} name="Configuration" desc="Payer edits its policy rules + clinical criteria (applied to the next case)" />
+          <NavRow icon={<Cpu size={14} strokeWidth={1.75} />} name="AI/ML API" desc="The model gateway: per-role models + live token/feature usage" />
+          <NavRow icon={<SlidersHorizontal size={14} strokeWidth={1.75} />} name="Configuration" who="payer" desc="Edit policy rules + clinical criteria (applied to the next case)" />
           <NavRow icon={<SettingsIcon size={14} strokeWidth={1.75} />} name="Settings" desc="Org + account; compliance PDF / JSON audit export" />
         </div>
       </Section>
@@ -175,12 +180,15 @@ function GoBtn({ onClick, children }: { onClick: () => void; children: React.Rea
   )
 }
 
-function NavRow({ icon, name, desc }: { icon: React.ReactNode; name: string; desc: string }) {
+function NavRow({ icon, name, desc, who }: { icon: React.ReactNode; name: string; desc: string; who?: 'provider' | 'payer' }) {
   return (
     <div className="flex items-start gap-2.5 rounded-sm border border-line bg-paper px-3 py-2.5">
       <span className="mt-0.5 text-ink-soft">{icon}</span>
       <div>
-        <p className="text-[13px] font-medium text-ink">{name}</p>
+        <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
+          {name}
+          {who && <Badge tone={who === 'provider' ? 'pine' : 'ink'}>{who} only</Badge>}
+        </p>
         <p className="text-[12px] text-ink-faint">{desc}</p>
       </div>
     </div>

@@ -50,6 +50,18 @@ const LAYERS = [
 
 const TECH = ['Band agentic mesh', 'AI/ML API', 'Anthropic Claude', 'GPT-5.5', 'LangGraph', 'Pydantic AI', 'PostgreSQL']
 
+// What the mesh genuinely uses from the AI/ML API (one gateway, one key, many models).
+const AIML_FEATURES: [string, string][] = [
+  ['Model heterogeneity', 'A different model per role — Claude Opus, Claude Sonnet, GPT-5.5 — behind one key.'],
+  ['Structured outputs', 'json_schema-typed, validated agent I/O — no free-text drift in a regulated domain.'],
+  ['reasoning_effort', 'Per-role cost/quality dial — deep on the Reviewer, light on Intake.'],
+  ['Streaming + usage', 'Turns stream token-by-token; the final chunk reports real token usage.'],
+  ['Vision', 'Reads an uploaded clinical document image straight into a typed request.'],
+  ['OCR', 'Turns PDF prior-auth packets into markdown, then structured fields.'],
+  ['Embeddings', 'Semantic retrieval of medical-necessity criteria — 1536-dim vectors.'],
+  ['Function calling', 'Typed turns produced via forced tool-calls through the gateway.'],
+]
+
 /* ── motion: scroll-reveal ─────────────────────────────────────────────── */
 function useReveal() {
   useEffect(() => {
@@ -162,17 +174,16 @@ function AgentTheater() {
   )
 }
 
-/** A transcript row that eases its own height (and opacity) open/closed — drives the smooth
- *  growth of the whole frame as messages arrive (grid-template-rows 0fr↔1fr). */
+/** A transcript row that reveals in place. Its full height is reserved at all times (the bubble
+ *  is laid out from the start, just transparent), so a message fades + lifts into a fixed slot
+ *  instead of growing the frame. That keeps the whole §04 block a stable height — no page-level
+ *  layout shift / content jump below it as the loop plays and resets. */
 function RevealRow({ open, children }: { open: boolean; children: ReactNode }) {
+  // min-w-0 lets a long message wrap (break-words) instead of widening the row on narrow screens.
   return (
-    // grid-cols-[100%] pins the (otherwise content-sized) implicit column to the container width,
-    // so a long message wraps instead of widening the page on narrow screens.
-    <div className="grid grid-cols-[100%] transition-[grid-template-rows] duration-[520ms] ease-[cubic-bezier(.2,.7,.2,1)]"
-      style={{ gridTemplateRows: open ? '1fr' : '0fr' }}>
-      <div className={`min-w-0 overflow-hidden transition-opacity duration-[520ms] ${open ? 'opacity-100' : 'opacity-0'}`}>
-        {children}
-      </div>
+    <div className={`min-w-0 transition-[opacity,transform] duration-[520ms] ease-[cubic-bezier(.2,.7,.2,1)] motion-reduce:transition-none ${
+      open ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}>
+      {children}
     </div>
   )
 }
@@ -561,10 +572,37 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* §06 — architecture rack */}
+      {/* §06 — the model layer (AI/ML API) */}
+      <section className="mx-auto max-w-6xl px-6 py-20 lg:py-28">
+        <Index n="§06" label="model layer" />
+        <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
+          <h2 data-reveal className="max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-[2.6rem]">
+            One gateway. Every model. <span className="text-pine">AI/ML API.</span>
+          </h2>
+          <p data-reveal className="max-w-md text-ink-soft">
+            Every agent — across both organizations — reasons through a single OpenAI-compatible
+            <span className="text-ink"> AI/ML API</span> gateway: one key, 600+ models, swap a slug to
+            re-route. We lean on its whole feature surface, not just chat.
+          </p>
+        </div>
+        <div data-reveal className="mt-10 grid gap-px overflow-hidden rounded-sm border border-line bg-line sm:grid-cols-2 lg:grid-cols-4">
+          {AIML_FEATURES.map(([t, d]) => (
+            <div key={t} className="bg-paper px-5 py-6 transition-colors hover:bg-sunk/40">
+              <div className="font-display text-[15px] font-semibold tracking-tight">{t}</div>
+              <p className="mt-2 text-[12.5px] leading-snug text-ink-soft">{d}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+          <code className="rounded-sm bg-sunk px-2 py-1 normal-case">api.aimlapi.com/v1</code>
+          · structured outputs · vision · OCR · embeddings · streaming — all in use
+        </p>
+      </section>
+
+      {/* §07 — architecture rack */}
       <section className="border-y border-ink/12 bg-sunk">
         <div className="mx-auto max-w-6xl px-6 py-20 lg:py-28">
-          <Index n="§06" label="how it's built" />
+          <Index n="§07" label="how it's built" />
           <h2 data-reveal className="mt-5 max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-[2.6rem]">Four layers, bottom-up. The intelligence stays simple.</h2>
           <p data-reveal className="mt-4 max-w-xl text-ink-soft">A protocol you can audit, an engine that's a plain loop, a domain pack that owns the rules, and a console you can log into. No black-box orchestrator.</p>
 

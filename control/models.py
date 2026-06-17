@@ -42,6 +42,14 @@ class MemberRole(str, Enum):
     MEMBER = "member"
 
 
+class OrgKind(str, Enum):
+    """Which side of the prior-auth exchange an organization sits on. Drives what the
+    console shows: a provider files requests + manages patients; a payer reviews + sets
+    policy. Defaults to ``provider`` (the hero side / clearest new-signup intent)."""
+    PROVIDER = "provider"   # medical organization (clinic/hospital) — files PA requests
+    PAYER = "payer"         # insurer / health plan — reviews requests, sets policy
+
+
 class CredentialKind(str, Enum):
     BAND_AGENT = "band_agent"
     BAND_USER = "band_user"
@@ -80,6 +88,7 @@ class Organization(SQLModel, table=True):
     name: str
     slug: str = Field(index=True, unique=True)
     plan: str = Field(default=Plan.FREE.value)
+    kind: str = Field(default=OrgKind.PROVIDER.value)  # provider | payer — drives console role-gating
     created_at: datetime = Field(default_factory=_now)
 
 

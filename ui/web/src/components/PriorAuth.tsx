@@ -392,7 +392,7 @@ function PrecheckPanel({ report, checking }: { report: PrecheckReport | null; ch
 //  PaWorklist — the org's cases
 // ================================================================================
 
-export function PaWorklist({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
+export function PaWorklist({ onOpen, onNew }: { onOpen: (id: string) => void; onNew?: () => void }) {
   const [items, setItems] = useState<PaSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -406,11 +406,15 @@ export function PaWorklist({ onOpen, onNew }: { onOpen: (id: string) => void; on
   const actionable = (items ?? []).filter((i) => i.actions.length > 0)
   const rest = (items ?? []).filter((i) => i.actions.length === 0)
 
+  const isProvider = !!onNew  // a provider files requests; a payer only reviews them
   return (
     <div>
-      <SectionTitle icon={<Inbox size={22} strokeWidth={1.75} />} title="Prior authorization"
-        subtitle="Live cases between provider and payer. Cases needing your action surface at the top."
-        right={<Button variant="secondary" size="sm" leadingIcon={<FilePlus2 size={14} strokeWidth={1.75} />} onClick={onNew}>New request</Button>} />
+      <SectionTitle icon={<Inbox size={22} strokeWidth={1.75} />}
+        title={isProvider ? 'Prior authorization' : 'Review queue'}
+        subtitle={isProvider
+          ? 'Your prior-auth requests and where each one stands. Cases needing your action surface at the top.'
+          : 'Incoming prior-auth requests to review. Cases needing your decision surface at the top.'}
+        right={onNew && <Button variant="secondary" size="sm" leadingIcon={<FilePlus2 size={14} strokeWidth={1.75} />} onClick={onNew}>New request</Button>} />
       {error && <p className="mb-4 text-[13px] text-coral">{error}</p>}
       {items === null ? (
         <p className="text-[13px] text-ink-faint">Loading…</p>
@@ -426,12 +430,12 @@ export function PaWorklist({ onOpen, onNew }: { onOpen: (id: string) => void; on
   )
 }
 
-function Empty({ onNew }: { onNew: () => void }) {
+function Empty({ onNew }: { onNew?: () => void }) {
   return (
     <div className="rounded-md border border-dashed border-line bg-paper/60 p-10 text-center">
       <Inbox size={28} strokeWidth={1.5} className="mx-auto mb-3 text-ink-faint" />
-      <p className="text-[14px] text-ink-soft">No prior-auth cases yet.</p>
-      <Button className="mt-4" size="sm" leadingIcon={<FilePlus2 size={14} strokeWidth={1.75} />} onClick={onNew}>Submit a request</Button>
+      <p className="text-[14px] text-ink-soft">{onNew ? 'No prior-auth cases yet.' : 'No requests to review yet.'}</p>
+      {onNew && <Button className="mt-4" size="sm" leadingIcon={<FilePlus2 size={14} strokeWidth={1.75} />} onClick={onNew}>Submit a request</Button>}
     </div>
   )
 }

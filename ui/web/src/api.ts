@@ -13,7 +13,7 @@ export function getAccessToken(): string | null {
 }
 
 export interface User { id: string; email: string; name: string }
-export interface Org { id: string; name: string; slug: string; plan: string }
+export interface Org { id: string; name: string; slug: string; plan: string; kind: 'provider' | 'payer' }
 export interface AuthResult { token: string; expires_in: number; user: User; org: Org | null }
 
 export class ApiError extends Error {
@@ -188,6 +188,29 @@ export interface AgentInfo {
 export const agentsApi = {
   /** The agent roster powering the mesh (roles, frameworks, models). */
   list: () => request<{ agents: AgentInfo[] }>('/api/agents', { auth: true }),
+}
+
+// ---- AI/ML API telemetry (what the mesh uses from the AI/ML gateway) -----------
+
+export interface AimlFeature {
+  key: string
+  label: string
+  status: 'in_use' | 'supported'
+  detail: string
+  metric: string | null
+}
+
+export interface AimlSurface {
+  gateway: { base_url: string; key_env: string; openai_compatible: boolean; catalog_models: number; app_models: string[] }
+  roles: { id: string; name: string; side: string; framework: string; model: string | null; reasoning_effort: string | null; human: boolean }[]
+  features: AimlFeature[]
+  usage: { models: { model: string; turns: number }[]; via: { via: string; count: number }[] }
+  totals: { runs: number; model_turns: number; tokens_in: number; tokens_out: number; tokens_total: number; criteria: number; embedding_dim: number }
+}
+
+export const aimlApi = {
+  /** What this app uses from the AI/ML API, grounded in real run telemetry. */
+  get: () => request<AimlSurface>('/api/aiml', { auth: true }),
 }
 
 // ---- interactive prior-auth workflow (the real two-sided, form-driven flow) ----

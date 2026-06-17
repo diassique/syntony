@@ -53,10 +53,15 @@ DEMO_ACCOUNTS: dict[str, dict[str, str]] = {
 }
 
 
-def _get_or_create_org(sess: Session, *, name: str, slug: str) -> Organization:
+def _get_or_create_org(sess: Session, *, name: str, slug: str, kind: str) -> Organization:
     org = sess.exec(select(Organization).where(Organization.slug == slug)).first()
     if org is None:
-        org = Organization(name=name, slug=slug)
+        org = Organization(name=name, slug=slug, kind=kind)
+        sess.add(org)
+        sess.commit()
+        sess.refresh(org)
+    elif org.kind != kind:                 # repair the side on an org seeded before `kind` existed
+        org.kind = kind
         sess.add(org)
         sess.commit()
         sess.refresh(org)
@@ -167,7 +172,7 @@ def seed_demo(sess: Session, *, password: str | None = None) -> dict:
     pw = password or os.environ.get("SYNTONY_DEMO_PASSWORD", DEFAULT_PASSWORD)
     summary: dict[str, dict] = {}
     for side, acc in DEMO_ACCOUNTS.items():
-        org = _get_or_create_org(sess, name=acc["org_name"], slug=acc["org_slug"])
+        org = _get_or_create_org(sess, name=acc["org_name"], slug=acc["org_slug"], kind=side)
         _get_or_create_owner(sess, email=acc["email"], name=acc["name"], password=pw, org=org)
         project = _ensure_project(sess, org=org)
         agents = _seed_agents(sess, project_id=project.id)  # the mesh cast → AgentConfig rows

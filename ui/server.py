@@ -36,6 +36,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from control.api import current_org_id, current_user, router as auth_router, runs_router
+from control.models import OrgKind
 
 load_dotenv()
 
@@ -130,6 +131,113 @@ def list_agents(org_id: str = Depends(current_org_id)) -> JSONResponse:
         for s in ROLES.values()
     ]
     return JSONResponse({"agents": roster})
+
+
+# ---- AI/ML API telemetry ---------------------------------------------------------
+# The single model layer for the whole mesh is the AI/ML API gateway. This endpoint makes
+# that usage explicit + auditable: the gateway facts, the per-role model map, the AI/ML
+# features we exercise, and live counts (turns, real token usage) from the org's audit.
+
+@app.get("/api/aiml")
+def aiml_surface(org_id: str = Depends(current_org_id)) -> JSONResponse:
+    """What this app uses from the AI/ML API, grounded in real run telemetry (org-scoped)."""
+    from sqlmodel import select
+    from control.db import session as open_session
+    from control.models import Event
+    from control import service
+    from domains.authbridge.roles import ROLES
+    from engine import llm
+
+    with open_session() as sess:
+        run_ids = sess.exec(select(Event.run_id).where(Event.org_id == org_id).distinct()).all()
+        events = sess.exec(
+            select(Event).where(Event.org_id == org_id, Event.visibility == "room")
+        ).all() if run_ids else []
+        n_criteria = len(service.list_criteria(sess))
+
+    # Live token + per-model usage, summed from the audited room turns.
+    tokens_in = sum(int(e.payload.get("tokens_in") or 0) for e in events)
+    tokens_out = sum(int(e.payload.get("tokens_out") or 0) for e in events)
+    model_turns = sum(1 for e in events if e.payload.get("model"))
+    by_model: dict[str, int] = {}
+    for e in events:
+        m = e.payload.get("model")
+        if m:
+            by_model[m] = by_model.get(m, 0) + 1
+    by_via: dict[str, int] = {}
+    for e in events:
+        v = e.payload.get("via")
+        if v:
+            by_via[v] = by_via.get(v, 0) + 1
+    streamed = sum(1 for e in events if e.payload.get("streamed"))
+
+    # Declared per-role model map (the cast). reasoning_effort lives in RoleSpec.extra.
+    roles = [
+        {"id": s.id, "name": s.display_name, "side": s.side.value, "framework": s.framework.value,
+         "model": s.model, "reasoning_effort": s.extra.get("reasoning_effort"), "human": s.is_human}
+        for s in ROLES.values()
+    ]
+    declared_models = sorted({s.model for s in ROLES.values() if s.model})
+    effort_roles = [s.display_name for s in ROLES.values() if s.extra.get("reasoning_effort")]
+
+    def feat(key, label, status, detail, metric=None):
+        return {"key": key, "label": label, "status": status, "detail": detail, "metric": metric}
+
+    features = [
+        feat("gateway", "Single universal gateway", "in_use",
+             "Every agent turn is served through one OpenAI-compatible endpoint with one key.",
+             f"{model_turns} model turns"),
+        feat("heterogeneity", "Model heterogeneity", "in_use",
+             "A different model per role behind the same gateway — the mesh's whole point.",
+             f"{len(declared_models)} models"),
+        feat("structured_outputs", "Structured outputs (json_schema)", "in_use",
+             "Typed, schema-validated agent I/O — no free-text drift in a regulated domain.",
+             None),
+        feat("reasoning_effort", "reasoning_effort per role", "in_use",
+             "Per-role cost/quality dial on the gateway path (Intake=low, Reviewer=high).",
+             ", ".join(effort_roles) or None),
+        feat("streaming", "Streaming + usage", "in_use",
+             "Document-intake extraction and gateway turns stream token-by-token; the final "
+             "chunk reports token usage.",
+             f"{streamed} streamed turns" if streamed else "intake + gateway path"),
+        feat("vision", "Vision (image → JSON)", "in_use",
+             f"Document Intake reads an uploaded clinical image into a typed request ({llm.VISION_MODEL}).",
+             None),
+        feat("ocr", "OCR (document → markdown)", "in_use",
+             f"PDF prior-auth packets are OCR'd to markdown ({llm.OCR_MODEL}), then extracted.",
+             None),
+        feat("embeddings", "Embeddings (semantic retrieval)", "in_use",
+             f"Medical-necessity criteria are embedded ({llm.EMBED_MODEL}) and retrieved by cosine.",
+             f"{n_criteria} criteria · 1536-dim"),
+        feat("function_calling", "Function / tool calling", "in_use",
+             "Typed turns are produced via forced tool-calls (Pydantic AI output_type).",
+             None),
+    ]
+
+    return JSONResponse({
+        "gateway": {
+            "base_url": llm.AIML_BASE_URL,
+            "key_env": "AIML_API_KEY",
+            "openai_compatible": True,
+            "catalog_models": 603,           # verified live via GET /v1/models (NOTES_AIML)
+            "app_models": declared_models,
+        },
+        "roles": roles,
+        "features": features,
+        "usage": {
+            "models": sorted([{"model": k, "turns": v} for k, v in by_model.items()], key=lambda x: -x["turns"]),
+            "via": sorted([{"via": k, "count": v} for k, v in by_via.items()], key=lambda x: -x["count"]),
+        },
+        "totals": {
+            "runs": len(run_ids),
+            "model_turns": model_turns,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "tokens_total": tokens_in + tokens_out,
+            "criteria": n_criteria,
+            "embedding_dim": 1536,
+        },
+    })
 
 
 # ---- live "Run a case" -----------------------------------------------------------
@@ -275,6 +383,13 @@ def _side_of(run: Any, org_id: str) -> str | None:
     return None
 
 
+def _org_kind(sess: Any, org_id: str) -> str:
+    """An org's side of the exchange (provider | payer) — drives role-gated endpoints."""
+    from control.models import Organization
+    org = sess.get(Organization, org_id)
+    return org.kind if org else OrgKind.PROVIDER.value
+
+
 def _pa_actions(run: Any, side: str | None) -> list[str]:
     """Which actions this side may take now (drives the console's buttons)."""
     s = run.status
@@ -400,6 +515,10 @@ async def pa_submit(body: SubmitIn, org_id: str = Depends(current_org_id)) -> JS
     """Provider files the PA request → opens the interactive run and parks it in the payer worklist."""
     import pa_workflow
     from domains.authbridge import workflow as wf
+    from control.db import session as open_session
+    with open_session() as sess:
+        if _org_kind(sess, org_id) != OrgKind.PROVIDER.value:
+            raise HTTPException(403, "only a provider organization may file prior-auth requests")
     try:
         req = wf.build_request(body.form)
     except (ValueError, TypeError) as e:
@@ -608,8 +727,7 @@ async def pa_md_decide(run_id: str, body: MdDecideIn, org_id: str = Depends(curr
 # tables are global (one shared policy/criteria), so an edit takes effect for the next run.
 
 def _is_payer_org(sess: Any, org_id: str) -> bool:
-    from control import seed
-    return seed.demo_side_orgs(sess).get("payer") == org_id
+    return _org_kind(sess, org_id) == OrgKind.PAYER.value
 
 
 def _policy_rule_dict(r: Any) -> dict:

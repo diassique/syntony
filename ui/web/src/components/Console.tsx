@@ -11,8 +11,9 @@ import {
   LayoutDashboard, FolderClosed, Boxes, BarChart3, Settings as SettingsIcon,
   Play, Upload, Copy, Check, ExternalLink, FileText, Braces,
   Lock, Clock, RotateCcw, Gavel, ChevronRight, Loader2, Inbox, FilePlus2, Users, BookOpen, SlidersHorizontal,
+  Cpu, Sparkles,
 } from 'lucide-react'
-import { runsApi, agentsApi, type AgentInfo, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
+import { runsApi, agentsApi, aimlApi, type AgentInfo, type AimlSurface, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
 import { Wordmark } from './Logo'
 import { Badge, Button, Select } from './ui'
@@ -20,7 +21,7 @@ import { PaSubmit, PaWorklist, PaCase, PatientsView } from './PriorAuth'
 import Guide from './Guide'
 import Config from './Config'
 
-type View = 'overview' | 'guide' | 'patients' | 'prior_auth' | 'submit' | 'cases' | 'agents' | 'insights' | 'config' | 'settings'
+type View = 'overview' | 'guide' | 'patients' | 'prior_auth' | 'submit' | 'cases' | 'agents' | 'insights' | 'aiml' | 'config' | 'settings'
 
 export default function Console() {
   const { user, org, logout } = useAuth()
@@ -36,6 +37,13 @@ export default function Console() {
   useEffect(() => { refresh() }, [])
 
   if (!user) return null // App guards this route.
+
+  // Role-gate: a section restricted to the other side falls back to Overview (defense-in-depth;
+  // the nav already hides it). Provider manages patients/files requests; payer sets policy.
+  const kind: 'provider' | 'payer' = org?.kind ?? 'provider'
+  const restricted: Partial<Record<View, 'provider' | 'payer'>> =
+    { patients: 'provider', submit: 'provider', config: 'payer' }
+  const activeView: View = restricted[view] && restricted[view] !== kind ? 'overview' : view
 
   const open = (id: string) => setOpenRun(id)
   const go = (v: View) => { setOpenRun(null); setOpenPa(null); if (v !== 'submit') setPreselectPatient(null); setView(v) }
@@ -77,7 +85,7 @@ export default function Console() {
 
   return (
     <div className="md:flex md:min-h-screen">
-      <Sidebar org={org} user={user} view={view} onNav={go} onSignOut={logout} />
+      <Sidebar org={org} user={user} view={activeView} onNav={go} onSignOut={logout} />
       <main className="min-w-0 flex-1 bg-bone">
         <div className="mx-auto max-w-5xl px-6 py-10 sm:px-10">
           {openRun ? (
@@ -85,25 +93,29 @@ export default function Console() {
               onBack={() => setOpenRun(null)} onComplete={refresh} />
           ) : openPa ? (
             <PaCase runId={openPa} onBack={() => setOpenPa(null)} />
-          ) : view === 'submit' ? (
+          ) : activeView === 'submit' ? (
             <PaSubmit onSubmitted={onSubmitted} initialPatientId={preselectPatient} />
-          ) : view === 'prior_auth' ? (
-            <PaWorklist onOpen={openPaCase} onNew={() => go('submit')} />
-          ) : view === 'patients' ? (
+          ) : activeView === 'prior_auth' ? (
+            <PaWorklist onOpen={openPaCase} onNew={kind === 'provider' ? () => go('submit') : undefined} />
+          ) : activeView === 'patients' ? (
             <PatientsView onOpenCase={openPaCase} onNewRequest={newRequestFor} />
-          ) : view === 'guide' ? (
+          ) : activeView === 'guide' ? (
             <Guide onGo={(v) => go(v as View)} />
-          ) : view === 'config' ? (
+          ) : activeView === 'config' ? (
             <Config />
-          ) : view === 'overview' ? (
+          ) : activeView === 'overview' ? (
             <Overview user={user} org={org} runs={runs} error={error} onOpen={open}
-              onSeeAll={() => go('cases')} onRunCase={runLiveCase} onIntake={runIntake} starting={starting} />
-          ) : view === 'cases' ? (
-            <Cases runs={runs} error={error} onOpen={open} onRunCase={runLiveCase} onIntake={runIntake} starting={starting} />
-          ) : view === 'agents' ? (
+              onSeeAll={() => go('cases')} onRunCase={runLiveCase} onIntake={runIntake} starting={starting}
+              canIntake={kind === 'provider'} />
+          ) : activeView === 'cases' ? (
+            <Cases runs={runs} error={error} onOpen={open} onRunCase={runLiveCase} onIntake={runIntake}
+              starting={starting} canIntake={kind === 'provider'} />
+          ) : activeView === 'agents' ? (
             <AgentsView />
-          ) : view === 'insights' ? (
+          ) : activeView === 'insights' ? (
             <InsightsView />
+          ) : activeView === 'aiml' ? (
+            <AimlView />
           ) : (
             <Settings user={user} org={org} />
           )}
@@ -166,24 +178,30 @@ function IntakeButton({ onIntake, starting }: { onIntake: (p: { image?: string; 
 
 /* ─── sidebar ─────────────────────────────────────────────────────────────── */
 function Sidebar({ org, user, view, onNav, onSignOut }: {
-  org: { name: string; plan: string } | null
+  org: { name: string; plan: string; kind?: 'provider' | 'payer' } | null
   user: { email: string; name: string }
   view: View
   onNav: (v: View) => void
   onSignOut: () => void
 }) {
-  const items: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+  // `only` gates a section to one side of the exchange. A provider (clinic/hospital) manages
+  // patients + files requests; a payer (insurer) reviews them + sets policy. Shared sections
+  // have no `only`. Role comes from org.kind (see OrgKind on the backend).
+  const kind = org?.kind ?? 'provider'
+  const allItems: { id: View; label: string; icon: typeof LayoutDashboard; only?: 'provider' | 'payer' }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-    { id: 'patients', label: 'Patients', icon: Users },
-    { id: 'prior_auth', label: 'Prior auth', icon: Inbox },
-    { id: 'submit', label: 'New request', icon: FilePlus2 },
+    { id: 'patients', label: 'Patients', icon: Users, only: 'provider' },
+    { id: 'prior_auth', label: kind === 'payer' ? 'Review queue' : 'Prior auth', icon: Inbox },
+    { id: 'submit', label: 'New request', icon: FilePlus2, only: 'provider' },
     { id: 'cases', label: 'Cases', icon: FolderClosed },
     { id: 'agents', label: 'Agents', icon: Boxes },
     { id: 'insights', label: 'Insights', icon: BarChart3 },
-    { id: 'config', label: 'Configuration', icon: SlidersHorizontal },
+    { id: 'aiml', label: 'AI/ML API', icon: Cpu },
+    { id: 'config', label: 'Configuration', icon: SlidersHorizontal, only: 'payer' },
     { id: 'guide', label: 'Guide', icon: BookOpen },
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ]
+  const items = allItems.filter((it) => !it.only || it.only === kind)
   return (
     <aside className="border-b border-line bg-paper/70 backdrop-blur md:sticky md:top-0 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:border-b-0 md:border-r">
       <div className="flex items-center gap-2.5 px-5 py-5">
@@ -234,7 +252,7 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
 }
 
 /* ─── overview ────────────────────────────────────────────────────────────── */
-function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, onIntake, starting }: {
+function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, onIntake, starting, canIntake }: {
   user: { name: string; email: string }
   org: { name: string } | null
   runs: RunSummary[] | null
@@ -244,6 +262,7 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, onIntak
   onRunCase: (caseName?: string) => void
   onIntake: (p: { image?: string; sample?: boolean }) => void
   starting: boolean
+  canIntake: boolean
 }) {
   const m = useMetrics(runs)
   return (
@@ -257,12 +276,12 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, onIntak
         </div>
         <div className="flex flex-col items-end gap-2 pt-1">
           <RunCaseButton onRunCase={onRunCase} starting={starting} />
-          <IntakeButton onIntake={onIntake} starting={starting} />
+          {canIntake && <IntakeButton onIntake={onIntake} starting={starting} />}
         </div>
       </div>
 
       <Quickstart hasRuns={!!runs && runs.length > 0} onOpenLatest={() => runs && runs[0] && onOpen(runs[0].id)}
-        onRunCase={onRunCase} onIntake={onIntake} starting={starting} />
+        onRunCase={onRunCase} onIntake={onIntake} starting={starting} canIntake={canIntake} />
 
       {error && <Banner>{error}</Banner>}
 
@@ -295,9 +314,9 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, onIntak
   )
 }
 
-function Quickstart({ hasRuns, onOpenLatest, onRunCase, onIntake, starting }: {
+function Quickstart({ hasRuns, onOpenLatest, onRunCase, onIntake, starting, canIntake }: {
   hasRuns: boolean; onOpenLatest: () => void; onRunCase: (caseName?: string) => void
-  onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean
+  onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean; canIntake: boolean
 }) {
   const KEY = 'syntony.console.quickstart'
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(KEY) === '1')
@@ -311,13 +330,15 @@ function Quickstart({ hasRuns, onOpenLatest, onRunCase, onIntake, starting }: {
       </div>
       <ol className="mt-4 grid gap-3 sm:grid-cols-3">
         <Step n="1" done title="Organization connected" body="Your side is on the mesh with an encrypted agent credential." />
-        <Step n="2" title="Run it or read a document"
-          body="Launch a live provider↔payer negotiation — or drop in a clinical document and let AI/ML read it." />
+        <Step n="2" title={canIntake ? 'Run it or read a document' : 'Run a live case'}
+          body={canIntake
+            ? 'Launch a live provider↔payer negotiation — or drop in a clinical document and let AI/ML read it.'
+            : 'Launch a live provider↔payer negotiation and watch it stream into your audit, decision by decision.'} />
         <Step n="3" title="Privacy by design" body="You see every message, but only your own agents' private reasoning." />
       </ol>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <RunCaseButton onRunCase={onRunCase} starting={starting} />
-        <IntakeButton onIntake={onIntake} starting={starting} />
+        {canIntake && <IntakeButton onIntake={onIntake} starting={starting} />}
         {hasRuns && (
           <button onClick={onOpenLatest}
             className="rounded-lg border border-pine/40 px-4 py-2 text-[13px] font-medium text-pine transition-colors hover:bg-pine/[0.06]">
@@ -345,10 +366,10 @@ function Step({ n, title, body, done }: { n: string; title: string; body: string
 }
 
 /* ─── cases ───────────────────────────────────────────────────────────────── */
-function Cases({ runs, error, onOpen, onRunCase, onIntake, starting }: {
+function Cases({ runs, error, onOpen, onRunCase, onIntake, starting, canIntake }: {
   runs: RunSummary[] | null; error: string | null; onOpen: (id: string) => void
   onRunCase: (caseName?: string) => void
-  onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean
+  onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean; canIntake: boolean
 }) {
   return (
     <>
@@ -359,7 +380,7 @@ function Cases({ runs, error, onOpen, onRunCase, onIntake, starting }: {
         </div>
         <div className="flex flex-col items-end gap-2 pt-1">
           <RunCaseButton onRunCase={onRunCase} starting={starting} subtle />
-          <IntakeButton onIntake={onIntake} starting={starting} />
+          {canIntake && <IntakeButton onIntake={onIntake} starting={starting} />}
         </div>
       </div>
       <p className="mt-3 max-w-xl text-ink-soft">Every prior-authorization negotiation your organization took part in, scoped to what your side is allowed to see.</p>
@@ -1010,6 +1031,113 @@ function AgentCard({ a, index }: { a: AgentInfo; index: number }) {
         ))}
       </div>
     </div>
+  )
+}
+
+/* ─── AI/ML API ───────────────────────────────────────────────────────────── */
+function AimlView() {
+  const [s, setS] = useState<AimlSurface | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    aimlApi.get().then(setS).catch((e) => setError(String(e?.message || e)))
+  }, [])
+
+  const n = (x: number) => x.toLocaleString('en-US')
+  const t = s?.totals
+  const turnsByModel = new Map((s?.usage.models ?? []).map((m) => [m.model, m.turns]))
+
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <Sparkles size={15} strokeWidth={1.75} className="text-pine" />
+        <Kicker>Powered by AI/ML API</Kicker>
+      </div>
+      <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">AI/ML API</h1>
+      <p className="mt-3 max-w-2xl text-ink-soft">
+        Every agent on the mesh — across both organizations — reasons through a single{' '}
+        <strong>AI/ML API</strong> gateway: one OpenAI-compatible endpoint, one key, many models.
+        These numbers are live, summed from this organization's audited runs.
+      </p>
+      {error && <Banner>{error}</Banner>}
+
+      {/* the gateway */}
+      <div className="mt-8 rounded-2xl border border-pine/25 bg-pine/[0.04] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Cpu size={18} strokeWidth={1.75} className="text-pine" />
+            <span className="font-display text-[16px] font-semibold">The gateway</span>
+          </div>
+          <code className="rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[12px] text-ink-soft">
+            {s ? s.gateway.base_url : '…'}
+          </code>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+          <span className="rounded bg-sunk px-2 py-1">OpenAI-compatible</span>
+          <span className="rounded bg-sunk px-2 py-1">1 key · {s ? s.gateway.key_env : 'AIML_API_KEY'}</span>
+          <span className="rounded bg-sunk px-2 py-1">{s ? n(s.gateway.catalog_models) : '—'} models in catalog</span>
+        </div>
+        {s && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {s.gateway.app_models.map((m) => (
+              <span key={m} className="flex items-center gap-1.5 rounded-lg border border-pine/30 bg-paper px-2.5 py-1 font-mono text-[11px] text-pine">
+                {m}
+                {turnsByModel.get(m) ? <span className="text-ink-faint">· {n(turnsByModel.get(m)!)} turns</span> : null}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* live totals */}
+      <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4">
+        {!s ? (
+          [0, 1, 2, 3].map((i) => (
+            <div key={i} className="bg-paper px-5 py-6"><span className="skeleton block h-8 w-16 rounded" /><span className="skeleton mt-3 block h-2.5 w-20 rounded" /></div>
+          ))
+        ) : (
+          <>
+            <Metric label="Model turns" value={t!.model_turns} />
+            <Metric label="Tokens in" value={t!.tokens_in} />
+            <Metric label="Tokens out" value={t!.tokens_out} accent />
+            <Metric label="Models used" value={s.gateway.app_models.length} />
+          </>
+        )}
+      </div>
+
+      {/* feature matrix */}
+      <h2 className="mt-10 mb-4 font-display text-xl font-semibold tracking-tight">Features in use</h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(s?.features ?? []).map((f) => (
+          <div key={f.key} className="lift rounded-xl border border-line bg-paper p-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-display text-[14px] font-semibold">{f.label}</span>
+              <Badge tone={f.status === 'in_use' ? 'pine' : 'ink'}>{f.status === 'in_use' ? 'in use' : 'supported'}</Badge>
+            </div>
+            <p className="mt-1.5 text-[12.5px] leading-snug text-ink-soft">{f.detail}</p>
+            {f.metric && <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-pine">{f.metric}</p>}
+          </div>
+        ))}
+        {!s && [0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-24 rounded-xl" />)}
+      </div>
+
+      {/* per-role model map */}
+      {s && (
+        <>
+          <h2 className="mt-10 mb-4 font-display text-xl font-semibold tracking-tight">Model per role</h2>
+          <div className="overflow-hidden rounded-xl border border-line">
+            {s.roles.map((r, i) => (
+              <div key={r.id} className={`flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 ${i % 2 ? 'bg-sunk/30' : 'bg-paper'}`}>
+                <span className={`h-2 w-2 shrink-0 rounded-full ${r.side === 'provider' ? 'bg-pine' : r.side === 'payer' ? 'bg-ink' : 'bg-coral'}`} />
+                <span className="min-w-[150px] text-[13px] font-medium">{r.name}</span>
+                <span className="font-mono text-[11px] text-ink-soft">{r.human ? 'human · HITL' : (r.model ?? '—')}</span>
+                <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{r.framework.replace(/_/g, ' ')}</span>
+                {r.reasoning_effort && <span className="ml-auto rounded bg-pine/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-pine">effort: {r.reasoning_effort}</span>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
   )
 }
 
