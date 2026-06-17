@@ -112,7 +112,7 @@ export default function Guide({ onGo }: { onGo?: Go }) {
           <Concept icon={<Stethoscope size={15} strokeWidth={1.75} />} title="Real agent frameworks"
             body="Each role's turn runs on a real framework (LangGraph / Pydantic AI) with the model served via the AI/ML gateway; the Medical Director is human." />
           <Concept icon={<FileSearch size={15} strokeWidth={1.75} />} title="AI/ML depth"
-            body="Vision/OCR document intake reads a clinical doc into a request; embeddings RAG grounds the guidelines review in retrieved criteria." />
+            body="Vision/OCR/dictation intake reads a clinical doc or spoken order into a request; embeddings RAG grounds the guidelines review; the AI/ML API section shows live usage." />
         </div>
       </Section>
 

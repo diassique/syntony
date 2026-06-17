@@ -42,6 +42,8 @@ FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"  # example only — UNCON
 VISION_MODEL = "gpt-5.5-2026-04-23"          # image→JSON; Claude is NOT vision-capable via this gateway
 EMBED_MODEL = "text-embedding-3-small"        # 1536-dim
 OCR_MODEL = "mistral/mistral-ocr-latest"      # /v1/ocr → pages[].markdown
+STT_MODEL = "#g1_nova-2-medical"              # /v1/stt async; medical-domain transcription (NOTES_AIML)
+TTS_MODEL = "openai/tts-1"                     # /v1/tts sync; returns a hosted mp3 url
 
 # Debug downshift target. Cheapest Claude tier on the gateway ($1/$5 per MTok). Haiku is
 # NOT reasoning-capable, so the debug path must NOT send `reasoning_effort` (AI/ML rejects
@@ -296,3 +298,59 @@ def ocr(url: str, *, model: str = OCR_MODEL, kind: str = "document_url",
     resp.raise_for_status()
     pages = resp.json().get("pages", [])
     return "\n\n".join(p.get("markdown", "") for p in pages).strip()
+
+
+# ---- speech (STT / TTS) ----------------------------------------------------------
+# AI/ML speech endpoints, verified live (2026-06-17, NOTES_AIML.md). STT is async
+# (create → poll); TTS is sync. Used for the dictation→intake path (the clinical-audio
+# sibling of vision/OCR document intake).
+
+def _aiml_key(env: Mapping[str, str] | None) -> str:
+    env = os.environ if env is None else env
+    key = env.get("AIML_API_KEY")
+    if not key:
+        raise LLMKeyMissing("AIML_API_KEY is not set — needed for the AI/ML speech endpoints.")
+    return key
+
+
+def transcribe(audio_url: str, *, model: str = STT_MODEL, env: Mapping[str, str] | None = None,
+               timeout: float = 90.0, poll_every: float = 2.0, max_polls: int = 40) -> str:
+    """Speech → text via AI/ML ``/v1/stt`` (async create + poll). Returns the transcript.
+
+    ``POST /v1/stt/create {model, url}`` → ``generation_id``; poll ``GET /v1/stt/{id}`` until
+    ``status=="completed"``; transcript at ``result.results.channels[0].alternatives[0].transcript``."""
+    import time
+    import httpx
+
+    headers = {"Authorization": f"Bearer {_aiml_key(env)}"}
+    created = httpx.post(f"{AIML_BASE_URL}/stt/create", headers=headers,
+                         json={"model": model, "url": audio_url}, timeout=timeout)
+    created.raise_for_status()
+    gen_id = created.json().get("generation_id") or created.json().get("id")
+    if not gen_id:
+        return ""
+    for _ in range(max_polls):
+        time.sleep(poll_every)
+        got = httpx.get(f"{AIML_BASE_URL}/stt/{gen_id}", headers=headers, timeout=timeout)
+        got.raise_for_status()
+        body = got.json()
+        if body.get("status") == "completed":
+            try:
+                return body["result"]["results"]["channels"][0]["alternatives"][0]["transcript"].strip()
+            except (KeyError, IndexError, TypeError):
+                return ""
+        if body.get("status") in ("error", "failed"):
+            return ""
+    return ""  # timed out — caller treats empty transcript as a failed extraction
+
+
+def synthesize(text: str, *, model: str = TTS_MODEL, env: Mapping[str, str] | None = None,
+               timeout: float = 60.0) -> str:
+    """Text → speech via AI/ML ``POST /v1/tts``. Returns a hosted audio URL (``openai/tts-1``
+    replies ``{audio:{url}}``). Used only to synthesize the demo dictation sample."""
+    import httpx
+
+    resp = httpx.post(f"{AIML_BASE_URL}/tts", headers={"Authorization": f"Bearer {_aiml_key(env)}"},
+                      json={"model": model, "text": text}, timeout=timeout)
+    resp.raise_for_status()
+    return (resp.json().get("audio") or {}).get("url", "")

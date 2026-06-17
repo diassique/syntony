@@ -527,6 +527,46 @@ def _parse_turn(text: str, *, fallback: str) -> dict:
     return {"message": plain, "reasoning": fallback}
 
 
+def _deep_reason(spec, user: str, client) -> dict | None:
+    """A genuine ``reasoning_effort`` pass for a high-stakes role (the dial the AI/ML API exposes).
+
+    Runs a dedicated gateway completion on the role's **declared** model with its declared effort
+    (Reviewer = opus/high, Intake = gpt-5.5/low — both verified to accept ``reasoning_effort``).
+    It is NOT downshifted (the cost downshift drops effort) and uses no forced structured output
+    (which conflicts with Anthropic "thinking"), so it stays a plain, free-text rationale. Streamed,
+    so it also reports token usage. Returns ``{reasoning, tokens_in, tokens_out, effort}`` or None.
+    """
+    effort = spec.extra.get("reasoning_effort")
+    if not effort or not spec.model:
+        return None
+    rcfg = LLMConfig(model=spec.model, reasoning_effort=effort, max_tokens=320)
+    messages = [
+        {"role": "system", "content": spec.system_prompt},
+        {"role": "user", "content": user + "\n\nReason carefully about medical necessity and policy, "
+         "then give a one-sentence private rationale (no PHI). Return prose, not JSON."},
+    ]
+    try:
+        text, (tin, tout) = stream_chat(client, completion_kwargs(rcfg, messages))
+    except Exception:  # noqa: BLE001 — reasoning is enrichment; never break a turn over it
+        return None
+    text = (text or "").strip()
+    return {"reasoning": text, "tokens_in": tin, "tokens_out": tout,
+            "effort": effort, "model": spec.model} if text else None
+
+
+def _with_deep(base: dict, deep: dict | None) -> dict:
+    """Fold a ``_deep_reason`` result into a turn: its rationale becomes the private reasoning,
+    its tokens add to the turn's, and ``reasoning_effort`` is stamped for the AI/ML telemetry."""
+    if not deep:
+        return base
+    base["reasoning"] = deep["reasoning"] or base.get("reasoning")
+    base["reasoning_effort"] = deep["effort"]
+    base["reasoning_model"] = deep.get("model")   # the reasoning pass runs on the declared (reasoning-capable) model
+    base["tokens_in"] = base.get("tokens_in", 0) + deep["tokens_in"]
+    base["tokens_out"] = base.get("tokens_out", 0) + deep["tokens_out"]
+    return base
+
+
 def llm_narrator(*, debug: bool = True, downshift: str | None = None) -> Narrator:
     """Build a narrator backed by the AI/ML gateway (via ``engine.llm``).
 
@@ -555,6 +595,9 @@ def llm_narrator(*, debug: bool = True, downshift: str | None = None) -> Narrato
             "by role, no PHI) and `reasoning` (one brief sentence). Phrase the facts; never override them."
         )
         cfg = LLMConfig.from_role(spec, debug=debug, downshift=downshift)
+        # High-stakes roles (those declaring reasoning_effort) get a genuine reasoning_effort pass
+        # on a reasoning-capable model — its rationale becomes the role's private reasoning.
+        deep = _deep_reason(spec, user, _client(LLMConfig(model=spec.model))) if spec.extra.get("reasoning_effort") else None
         # Roles backed by a wired framework (Pydantic AI / LangGraph) run their turn THROUGH it;
         # the model is served via the AI/ML gateway. Best-effort: fall through on any failure.
         fw = turn_fn(spec.framework.value)
@@ -567,9 +610,9 @@ def llm_narrator(*, debug: bool = True, downshift: str | None = None) -> Narrato
                 if msg and not looks_like_blob(msg):
                     # `via` records the path that actually produced this turn (provenance); `model`
                     # + token counts feed the AI/ML usage telemetry (served via the AI/ML gateway).
-                    return {"message": msg, "reasoning": out.get("reasoning") or msg,
-                            "via": spec.framework.value, "model": cfg.model,
-                            "tokens_in": out.get("tokens_in", 0), "tokens_out": out.get("tokens_out", 0)}
+                    return _with_deep({"message": msg, "reasoning": out.get("reasoning") or msg,
+                                       "via": spec.framework.value, "model": cfg.model,
+                                       "tokens_in": out.get("tokens_in", 0), "tokens_out": out.get("tokens_out", 0)}, deep)
                 log.warning("narrator: %s %s output unusable → gateway", role_id, spec.framework.value)
             except Exception as e:  # noqa: BLE001 — framework hiccup → fall back to the gateway
                 log.warning("narrator: %s %s failed → gateway: %s: %s",
@@ -582,11 +625,11 @@ def llm_narrator(*, debug: bool = True, downshift: str | None = None) -> Narrato
             kwargs["max_tokens"] = 400
             # Stream the gateway turn (genuine use of AI/ML streaming) + capture token usage.
             text, (tin, tout) = stream_chat(_client(cfg), kwargs)
-            return {**_parse_turn(text, fallback=facts), "via": "aiml-gateway", "streamed": True,
-                    "model": cfg.model, "tokens_in": tin, "tokens_out": tout}
+            return _with_deep({**_parse_turn(text, fallback=facts), "via": "aiml-gateway", "streamed": True,
+                               "model": cfg.model, "tokens_in": tin, "tokens_out": tout}, deep)
         except Exception:  # noqa: BLE001 — a provider/key/slug failure must never break the run
             # Graceful degradation: phrase deterministically (e.g. the LLM gateway is unavailable).
-            return {"message": facts, "reasoning": facts, "via": "fallback"}
+            return _with_deep({"message": facts, "reasoning": facts, "via": "fallback"}, deep)
 
     return narrate
 
@@ -620,6 +663,10 @@ def build_runner(*, narrate: Narrator | None = None):
             payload["model"] = content["model"]              # AI/ML gateway slug that served this turn
         if content.get("streamed"):
             payload["streamed"] = True                       # produced via the streaming gateway path
+        if content.get("reasoning_effort"):
+            payload["reasoning_effort"] = content["reasoning_effort"]  # deep reasoning_effort pass ran
+        if content.get("reasoning_model"):
+            payload["reasoning_model"] = content["reasoning_model"]    # model that ran the reasoning pass
         for tk in ("tokens_in", "tokens_out"):               # real token usage (AI/ML telemetry)
             if content.get(tk):
                 payload[tk] = content[tk]

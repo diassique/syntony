@@ -164,12 +164,16 @@ def aiml_surface(org_id: str = Depends(current_org_id)) -> JSONResponse:
         m = e.payload.get("model")
         if m:
             by_model[m] = by_model.get(m, 0) + 1
+        rm = e.payload.get("reasoning_model")   # the deep reasoning_effort pass is a real extra model call
+        if rm:
+            by_model[rm] = by_model.get(rm, 0) + 1
     by_via: dict[str, int] = {}
     for e in events:
         v = e.payload.get("via")
         if v:
             by_via[v] = by_via.get(v, 0) + 1
     streamed = sum(1 for e in events if e.payload.get("streamed"))
+    reasoning_turns = sum(1 for e in events if e.payload.get("reasoning_effort"))
 
     # Declared per-role model map (the cast). reasoning_effort lives in RoleSpec.extra.
     roles = [
@@ -194,8 +198,9 @@ def aiml_surface(org_id: str = Depends(current_org_id)) -> JSONResponse:
              "Typed, schema-validated agent I/O — no free-text drift in a regulated domain.",
              None),
         feat("reasoning_effort", "reasoning_effort per role", "in_use",
-             "Per-role cost/quality dial on the gateway path (Intake=low, Reviewer=high).",
-             ", ".join(effort_roles) or None),
+             "A genuine reasoning pass on a reasoning-capable model drives the deepest roles' "
+             "private rationale (Intake=low, Reviewer=high).",
+             f"{reasoning_turns} reasoning passes" if reasoning_turns else (", ".join(effort_roles) or None)),
         feat("streaming", "Streaming + usage", "in_use",
              "Document-intake extraction and gateway turns stream token-by-token; the final "
              "chunk reports token usage.",
@@ -205,6 +210,10 @@ def aiml_surface(org_id: str = Depends(current_org_id)) -> JSONResponse:
              None),
         feat("ocr", "OCR (document → markdown)", "in_use",
              f"PDF prior-auth packets are OCR'd to markdown ({llm.OCR_MODEL}), then extracted.",
+             None),
+        feat("stt", "Speech-to-text (dictation)", "in_use",
+             f"A dictated clinical order is transcribed ({llm.STT_MODEL}, medical-domain) → typed "
+             "request. (A sample is voiced with TTS for the one-click demo.)",
              None),
         feat("embeddings", "Embeddings (semantic retrieval)", "in_use",
              f"Medical-necessity criteria are embedded ({llm.EMBED_MODEL}) and retrieved by cosine.",
@@ -289,9 +298,11 @@ async def start_live_run(
 
 
 class IntakeIn(BaseModel):
-    image: str | None = None         # data URI (png/jpg, base64) — vision path
-    document_url: str | None = None  # public PDF/image URL — OCR path
-    sample: bool = False             # use a built-in synthetic form (vision path)
+    image: str | None = None          # data URI (png/jpg, base64) — vision path
+    document_url: str | None = None   # public PDF/image URL — OCR path
+    audio_url: str | None = None      # public audio URL — STT (dictation) path
+    sample: bool = False              # use a built-in synthetic form (vision path)
+    dictation_sample: bool = False    # synthesize a sample dictation (TTS) then transcribe it (STT)
 
 
 @app.post("/api/runs/intake", status_code=202)
@@ -311,15 +322,28 @@ async def intake_run(body: IntakeIn | None = None, org_id: str = Depends(current
         raise HTTPException(429, "too many live runs in progress — try again shortly")
 
     body = body or IntakeIn()
+
+    def _dictation_sample_request():
+        # synthesize the spoken order (AI/ML TTS) → hosted url → transcribe (AI/ML STT) → request
+        from engine import llm
+        audio_url = llm.synthesize(intake.sample_dictation_text())
+        if not audio_url:
+            raise RuntimeError("TTS returned no audio url")
+        return intake.extract_request_from_audio(audio_url)
+
     try:
         if body.sample:
             req = await asyncio.to_thread(intake.extract_request_from_image, intake.sample_document_data_uri())
+        elif body.dictation_sample:
+            req = await asyncio.to_thread(_dictation_sample_request)
+        elif body.audio_url:
+            req = await asyncio.to_thread(intake.extract_request_from_audio, body.audio_url)
         elif body.image:
             req = await asyncio.to_thread(intake.extract_request_from_image, body.image)
         elif body.document_url:
             req = await asyncio.to_thread(intake.extract_request_from_pdf, body.document_url)
         else:
-            raise HTTPException(400, "provide an image, a document_url, or sample=true")
+            raise HTTPException(400, "provide an image, a document_url, an audio_url, or sample/dictation_sample=true")
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001

@@ -87,6 +87,31 @@ def extract_request_from_pdf(document_url: str) -> PriorAuthRequest:
     return _to_request(extract_from_text(markdown, schema=EXTRACT_SCHEMA, instruction=INSTRUCTION))
 
 
+def extract_request_from_audio(audio_url: str) -> PriorAuthRequest:
+    """Transcribe a dictated clinical note (AI/ML STT) → structure it → typed request.
+
+    The audio sibling of document intake: a clinician dictates the order, AI/ML transcribes it
+    (medical-domain STT), and a model extracts the prior-auth fields from the transcript."""
+    from engine.llm import extract_from_text, transcribe
+
+    transcript = transcribe(audio_url)
+    if not transcript:
+        raise ValueError("transcription returned no text")
+    return _to_request(extract_from_text(transcript, schema=EXTRACT_SCHEMA, instruction=INSTRUCTION))
+
+
+def sample_dictation_text() -> str:
+    """A synthetic spoken prior-auth order (no real PHI) — TTS'd to make the demo's sample audio.
+    Codes are spaced so the speech model voices them clearly; the extractor normalizes them."""
+    return (
+        "Prior authorization request. Procedure: MRI of the lumbar spine without contrast, "
+        "C P T code 7 2 1 4 8. Diagnosis: lumbar radiculopathy, I C D 10 code M 54 point 5. "
+        "Ordering provider doctor A Rivera, signed. The patient completed eight weeks of "
+        "physical therapy and N S A I D s without improvement; conservative therapy notes are "
+        "attached. Priority routine."
+    )
+
+
 def sample_document_data_uri() -> str:
     """A synthetic prior-auth form image (no real PHI) for the demo's 'use a sample' path."""
     from PIL import Image, ImageDraw

@@ -49,7 +49,7 @@ def record_envelope(
     # carry PA audit + provenance + determination details onto the room copy
     for k in ("outcome", "pa_event", "denial_reason", "framework", "via",
               "auth_number", "overturned", "hitl", "appealable", "gold_card",
-              "model", "tokens_in", "tokens_out", "streamed"):   # AI/ML provenance + real token telemetry
+              "model", "reasoning_model", "tokens_in", "tokens_out", "streamed", "reasoning_effort"):  # AI/ML telemetry
         if env.payload.get(k):
             room_payload[k] = env.payload[k]
 

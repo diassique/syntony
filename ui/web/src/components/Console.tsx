@@ -11,7 +11,7 @@ import {
   LayoutDashboard, FolderClosed, Boxes, BarChart3, Settings as SettingsIcon,
   Play, Upload, Copy, Check, ExternalLink, FileText, Braces,
   Lock, Clock, RotateCcw, Gavel, ChevronRight, Loader2, Inbox, FilePlus2, Users, BookOpen, SlidersHorizontal,
-  Cpu, Sparkles,
+  Cpu, Sparkles, Mic,
 } from 'lucide-react'
 import { runsApi, agentsApi, aimlApi, type AgentInfo, type AimlSurface, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
@@ -68,7 +68,7 @@ export default function Console() {
   }
 
   // Document intake (AI/ML vision/OCR): extract a request from an uploaded image / sample, then run it.
-  const runIntake = async (payload: { image?: string; sample?: boolean }) => {
+  const runIntake = async (payload: { image?: string; sample?: boolean; dictation_sample?: boolean }) => {
     if (starting) return
     setStarting(true)
     setError(null)
@@ -151,7 +151,7 @@ function RunCaseButton({ onRunCase, starting, subtle }: { onRunCase: (caseName?:
 }
 
 /** Document intake: upload a clinical document image (AI/ML vision reads it) or use a sample. */
-function IntakeButton({ onIntake, starting }: { onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean }) {
+function IntakeButton({ onIntake, starting }: { onIntake: (p: { image?: string; sample?: boolean; dictation_sample?: boolean }) => void; starting: boolean }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -171,6 +171,12 @@ function IntakeButton({ onIntake, starting }: { onIntake: (p: { image?: string; 
       <button onClick={() => onIntake({ sample: true })} disabled={starting}
         className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft transition-colors hover:text-pine disabled:opacity-60">
         use sample
+      </button>
+      <span className="text-line">·</span>
+      <button onClick={() => onIntake({ dictation_sample: true })} disabled={starting}
+        title="Synthesize a spoken order (AI/ML TTS) and transcribe it (AI/ML speech-to-text)"
+        className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft transition-colors hover:text-pine disabled:opacity-60">
+        <Mic size={12} strokeWidth={1.75} aria-hidden /> dictate
       </button>
     </div>
   )
@@ -260,7 +266,7 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, onIntak
   onOpen: (id: string) => void
   onSeeAll: () => void
   onRunCase: (caseName?: string) => void
-  onIntake: (p: { image?: string; sample?: boolean }) => void
+  onIntake: (p: { image?: string; sample?: boolean; dictation_sample?: boolean }) => void
   starting: boolean
   canIntake: boolean
 }) {
@@ -316,7 +322,7 @@ function Overview({ user, org, runs, error, onOpen, onSeeAll, onRunCase, onIntak
 
 function Quickstart({ hasRuns, onOpenLatest, onRunCase, onIntake, starting, canIntake }: {
   hasRuns: boolean; onOpenLatest: () => void; onRunCase: (caseName?: string) => void
-  onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean; canIntake: boolean
+  onIntake: (p: { image?: string; sample?: boolean; dictation_sample?: boolean }) => void; starting: boolean; canIntake: boolean
 }) {
   const KEY = 'syntony.console.quickstart'
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(KEY) === '1')
@@ -369,7 +375,7 @@ function Step({ n, title, body, done }: { n: string; title: string; body: string
 function Cases({ runs, error, onOpen, onRunCase, onIntake, starting, canIntake }: {
   runs: RunSummary[] | null; error: string | null; onOpen: (id: string) => void
   onRunCase: (caseName?: string) => void
-  onIntake: (p: { image?: string; sample?: boolean }) => void; starting: boolean; canIntake: boolean
+  onIntake: (p: { image?: string; sample?: boolean; dictation_sample?: boolean }) => void; starting: boolean; canIntake: boolean
 }) {
   return (
     <>

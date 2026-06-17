@@ -58,6 +58,7 @@ const AIML_FEATURES: [string, string][] = [
   ['Streaming + usage', 'Turns stream token-by-token; the final chunk reports real token usage.'],
   ['Vision', 'Reads an uploaded clinical document image straight into a typed request.'],
   ['OCR', 'Turns PDF prior-auth packets into markdown, then structured fields.'],
+  ['Speech-to-text', 'A dictated clinical order is transcribed (medical-domain) into a typed request.'],
   ['Embeddings', 'Semantic retrieval of medical-necessity criteria — 1536-dim vectors.'],
   ['Function calling', 'Typed turns produced via forced tool-calls through the gateway.'],
 ]
