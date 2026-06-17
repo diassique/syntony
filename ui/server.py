@@ -104,10 +104,23 @@ def state(room: str = "") -> JSONResponse:
     return JSONResponse(build_state(room or DEFAULT_ROOM))
 
 
+def _has_own_band_agent(role_id: str, human: bool) -> bool:
+    """True if this role posts under its **own** Band identity: the two account primaries
+    (intake/reviewer use the CLINIC_/PAYER_AGENT keys) or a provisioned specialist (env stem
+    ``PROVIDER_COUNSEL_AGENT_ID`` …). Human roles (the Medical Director) have no Band agent."""
+    if human:
+        return False
+    if role_id in ("provider.intake", "payer.reviewer"):
+        return True
+    stem = role_id.upper().replace(".", "_")
+    return bool(os.environ.get(f"{stem}_AGENT_ID", "").strip())
+
+
 @app.get("/api/agents")
 def list_agents(org_id: str = Depends(current_org_id)) -> JSONResponse:
-    """The agent roster (the mesh cast): each role's side, framework, model and the protocol
-    states it acts in. Served from the org's AgentConfig rows (DB); falls back to the code roster."""
+    """The agent roster (the mesh cast): each role's side, framework, model, the protocol states it
+    acts in, and whether it runs as its own Band participant. Served from AgentConfig (DB); falls
+    back to the code roster."""
     from control.db import session as open_session
     from control import service
     with open_session() as sess:
@@ -119,6 +132,7 @@ def list_agents(org_id: str = Depends(current_org_id)) -> JSONResponse:
                 "framework": c.framework, "model": c.model or None,
                 "acts_in": (c.extra or {}).get("acts_in", []),
                 "human": (c.extra or {}).get("human", False),
+                "own_band_agent": _has_own_band_agent(c.role_id, (c.extra or {}).get("human", False)),
             }
             for c in cfgs
         ]
@@ -127,7 +141,8 @@ def list_agents(org_id: str = Depends(current_org_id)) -> JSONResponse:
     from domains.authbridge.roles import ROLES  # fallback: cast not seeded
     roster = [
         {"id": s.id, "name": s.display_name, "side": s.side.value, "framework": s.framework.value,
-         "model": s.model, "acts_in": [st.value for st in s.acts_in], "human": s.is_human}
+         "model": s.model, "acts_in": [st.value for st in s.acts_in], "human": s.is_human,
+         "own_band_agent": _has_own_band_agent(s.id, s.is_human)}
         for s in ROLES.values()
     ]
     return JSONResponse({"agents": roster})

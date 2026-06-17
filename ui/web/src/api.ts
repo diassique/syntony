@@ -183,6 +183,7 @@ export interface AgentInfo {
   model: string | null
   acts_in: string[]
   human: boolean
+  own_band_agent?: boolean   // posts under its own registered Band identity (vs human / fallback)
 }
 
 export const agentsApi = {

@@ -1005,24 +1005,26 @@ function AgentsView() {
   const payer = all.filter((a) => a.side === 'payer')
   const neutral = all.filter((a) => a.side === 'neutral')
   const frameworks = new Set(all.map((a) => a.framework)).size
+  const bandAgents = all.filter((a) => a.own_band_agent).length
 
   return (
     <>
       <Kicker>The mesh</Kicker>
       <h1 className="mt-3 font-display text-3xl font-medium tracking-tight text-ink">Agents</h1>
-      <p className="mt-3 max-w-xl text-ink-soft">Every specialist on the mesh — heterogeneous frameworks and models, one protocol — collaborating across two organizations on each case.</p>
+      <p className="mt-3 max-w-xl text-ink-soft">Every specialist on the mesh — heterogeneous frameworks and models, one protocol — collaborating across two organizations on each case. Each agent posts under its <span className="text-ink">own Band identity</span>; the Medical Director is a human.</p>
       {error && <Banner>{error}</Banner>}
 
-      <div className="mt-8 grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-line bg-line">
+      <div className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4">
         {agents === null ? (
-          [0, 1, 2].map((i) => (
+          [0, 1, 2, 3].map((i) => (
             <div key={i} className="bg-paper px-5 py-6"><span className="skeleton block h-8 w-12 rounded" /><span className="skeleton mt-3 block h-2.5 w-20 rounded" /></div>
           ))
         ) : (
           <>
             <Metric label="Agents" value={all.length} />
+            <Metric label="Band identities" value={bandAgents} accent />
             <Metric label="Frameworks" value={frameworks} />
-            <Metric label="Organizations" value={2} accent />
+            <Metric label="Organizations" value={2} />
           </>
         )}
       </div>
@@ -1070,6 +1072,11 @@ function AgentCard({ a, index }: { a: AgentInfo; index: number }) {
       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">
         <span>{a.id}</span>
         {a.model && <span className="text-ink-soft">{a.model}</span>}
+        {a.own_band_agent && (
+          <span className="inline-flex items-center gap-1 text-pine" title="Runs as its own registered Band agent in the case room">
+            <Boxes size={11} strokeWidth={1.75} /> own band agent
+          </span>
+        )}
       </div>
       <div className="mt-2.5 flex flex-wrap gap-1">
         {a.acts_in.map((s) => (
