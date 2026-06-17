@@ -6,11 +6,14 @@ agent, payer roles as the payer agent, in one shared room. The spectator dashboa
 (https://syntony.live) renders that room from each account's side, so the privacy model is
 visible (a private `thought` shows only on its author's column).
 
-Two Band agents play several logical roles each (clinic = intake+counsel, payer = reviewer+MD);
-mentions are mapped from logical role ids to the real Band agent UUIDs so routing works.
+Each role posts under its OWN Band identity (9 distinct agents: the 2 account primaries +
+7 provisioned specialists; the human Medical Director has no agent) — falling back to the side
+primary if a specialist isn't provisioned. Mentions map logical role ids → real Band agent UUIDs.
+(The mesh-wiring mirrors ``live_run._build_tools_for`` — dedupe into one helper is a TODO.)
 
 Usage:
     PYTHONPATH=. .venv/bin/python run_all.py [--case NAME] [--room ID|--fresh] [--full] [--no-llm]
+    For the pitch video: ``--full --fresh`` (strong tier, fresh room with all 9 agents).
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from dotenv import load_dotenv
 from domains.authbridge.roles import ROLES
 from domains.authbridge.runner import llm_narrator, run_authbridge
 from engine.agent_base import Side
-from engine.band_room import RestRoomTools, agent_client, ensure_room
+from engine.band_room import RestRoomTools, add_participants, agent_client, ensure_room
 from protocol import Envelope
 
 
@@ -40,24 +43,59 @@ def main() -> None:
     args = ap.parse_args()
 
     rest_url = os.environ.get("BAND_REST_URL", "https://app.band.ai")
-    clinic_id = os.environ["CLINIC_AGENT_ID"]
-    payer_id = os.environ["PAYER_AGENT_ID"]
-    clinic = agent_client(os.environ["CLINIC_AGENT_API_KEY"], rest_url)
-    payer = agent_client(os.environ["PAYER_AGENT_API_KEY"], rest_url)
+    clinic_id = os.environ["CLINIC_AGENT_ID"]            # provider primary (Clinic Intake)
+    clinic_key = os.environ["CLINIC_AGENT_API_KEY"]
+    payer_id = os.environ["PAYER_AGENT_ID"]              # payer primary (Payer Reviewer)
+    payer_key = os.environ["PAYER_AGENT_API_KEY"]
 
-    room = ensure_room(clinic, payer_id, room_id=None if args.fresh else args.room)
-    print(f"room: {room}")
+    # Resolve each role to its OWN Band identity (env stem PROVIDER_COUNSEL_AGENT_ID/…), falling
+    # back to the side primary if a specialist isn't provisioned.
+    def resolve(rid: str, spec) -> tuple[str, str]:
+        stem = rid.upper().replace(".", "_")
+        aid = os.environ.get(f"{stem}_AGENT_ID", "").strip()
+        akey = os.environ.get(f"{stem}_AGENT_API_KEY", "").strip()
+        if aid and akey:
+            return aid, akey
+        return (payer_id, payer_key) if spec.side is Side.PAYER else (clinic_id, clinic_key)
 
-    # logical role id -> Band agent UUID (for @mention routing)
-    mention_map = {
-        rid: (payer_id if spec.side is Side.PAYER else clinic_id) for rid, spec in ROLES.items()
-    }
-    clinic_tools = RestRoomTools(clinic, room, mention_map=mention_map, self_id=clinic_id, default_mention=payer_id)
-    payer_tools = RestRoomTools(payer, room, mention_map=mention_map, self_id=payer_id, default_mention=clinic_id)
+    ident = {rid: resolve(rid, spec) for rid, spec in ROLES.items() if not spec.is_human}
+    mention_map = {rid: aid for rid, (aid, _) in ident.items()}
+    for rid, spec in ROLES.items():
+        if spec.is_human:
+            mention_map[rid] = payer_id if spec.side is Side.PAYER else clinic_id
+
+    agents: dict[str, str] = {clinic_id: clinic_key, payer_id: payer_key}
+    for aid, akey in ident.values():
+        agents.setdefault(aid, akey)
+    clinic = agent_client(clinic_key, rest_url)
+    clients = {clinic_id: clinic}
+    for aid, akey in agents.items():
+        clients.setdefault(aid, agent_client(akey, rest_url))
+
+    # each primary adds its own-account specialists (same-account add; cross-account needs a contact)
+    provider_specialists = [aid for rid, (aid, _) in ident.items()
+                            if ROLES[rid].side is Side.PROVIDER and aid != clinic_id]
+    payer_specialists = [aid for rid, (aid, _) in ident.items()
+                         if ROLES[rid].side is Side.PAYER and aid != payer_id]
+    room_id = None if args.fresh else args.room
+    room = ensure_room(clinic, *provider_specialists, payer_id, room_id=room_id)
+    if room_id is None:
+        add_participants(clients[payer_id], room, payer_specialists)
+    print(f"room: {room} | {len(agents)} band identities")
+
+    tools_by_role = {}
+    for rid, (aid, _) in ident.items():
+        default = clinic_id if ROLES[rid].side is Side.PAYER else payer_id
+        tools_by_role[rid] = RestRoomTools(clients[aid], room, mention_map=mention_map,
+                                           self_id=aid, default_mention=default)
+    clinic_primary = RestRoomTools(clinic, room, mention_map=mention_map, self_id=clinic_id, default_mention=payer_id)
+    payer_primary = RestRoomTools(clients[payer_id], room, mention_map=mention_map, self_id=payer_id, default_mention=clinic_id)
 
     def tools_for(env: Envelope):
+        if env.author in tools_by_role:
+            return tools_by_role[env.author]
         spec = ROLES.get(env.author)
-        return payer_tools if (spec and spec.side is Side.PAYER) else clinic_tools
+        return payer_primary if (spec and spec.side is Side.PAYER) else clinic_primary
 
     narrate = None if args.no_llm else llm_narrator(debug=not args.full)
     tier = "deterministic" if args.no_llm else ("strong" if args.full else "cheap/Haiku")
