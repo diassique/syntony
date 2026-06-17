@@ -27,15 +27,28 @@ from dotenv import load_dotenv
 from thenvoi_rest import AgentRegisterRequest, RestClient
 
 #: role_id → (account Human-key env var, agent display name, description).
+#: Full mesh: every model-backed role gets its own Band identity (the 2 account primaries —
+#: provider.intake, payer.reviewer — reuse the existing CLINIC_/PAYER_AGENT keys; the human
+#: Medical Director is HITL, no agent). That makes the ~10-agent cast visible in the Band room.
+#: NOTE — the two Human-key env vars are CROSSED vs the agents they own (verified live):
+#:   CLINIC_USER_API_KEY  owns the PAYER primary  ("Payer Reviewer Agent")  → register PAYER-side here
+#:   PAYER_USER_API_KEY   owns the PROVIDER primary ("Clinic Intake Agent") → register PROVIDER-side here
+#: So each specialist is registered under the SAME account as its side's primary.
 NEW_AGENTS: dict[str, tuple[str, str, str]] = {
-    "provider.counsel": ("CLINIC_USER_API_KEY", "Clinic Counsel",
+    "provider.counsel": ("PAYER_USER_API_KEY", "Clinic Counsel",
                          "Provider-side medical-necessity counsel agent (Syntony prior-auth mesh)."),
-    "provider.eligibility": ("CLINIC_USER_API_KEY", "Clinic Eligibility & Benefits",
+    "provider.eligibility": ("PAYER_USER_API_KEY", "Clinic Eligibility & Benefits",
                              "Provider-side eligibility/benefits agent (Syntony prior-auth mesh)."),
-    "payer.pharmacy": ("PAYER_USER_API_KEY", "Payer Pharmacy & Formulary",
+    "provider.appeals": ("PAYER_USER_API_KEY", "Clinic Appeals",
+                         "Provider-side appeals agent that cures denials and resubmits (Syntony prior-auth mesh)."),
+    "payer.pharmacy": ("CLINIC_USER_API_KEY", "Payer Pharmacy & Formulary",
                        "Payer-side pharmacy/formulary agent (Syntony prior-auth mesh)."),
-    "payer.guidelines": ("PAYER_USER_API_KEY", "Payer Clinical Guidelines",
+    "payer.guidelines": ("CLINIC_USER_API_KEY", "Payer Clinical Guidelines",
                          "Payer-side clinical-guidelines agent (Syntony prior-auth mesh)."),
+    "payer.compliance": ("CLINIC_USER_API_KEY", "Payer Compliance & Audit",
+                         "Payer-side compliance/audit agent (Syntony prior-auth mesh)."),
+    "payer.notification": ("CLINIC_USER_API_KEY", "Payer Member Notification",
+                           "Payer-side determination-notice drafting agent (Syntony prior-auth mesh)."),
 }
 
 

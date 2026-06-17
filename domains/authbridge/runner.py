@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 
 from engine.coordinator import CaseContext, Move
 from engine.frameworks import turn_fn
-from engine.llm import LLMConfig, completion_kwargs, looks_like_blob, make_client, stream_chat
+from engine.llm import LLMConfig, completion_kwargs, looks_like_blob, loads_json, make_client, stream_chat
 from protocol import Envelope, Kind, State, Visibility
 
 from .policy import (
@@ -527,6 +527,18 @@ def _parse_turn(text: str, *, fallback: str) -> dict:
     return {"message": plain, "reasoning": fallback}
 
 
+def _plain(text: str) -> str:
+    """Keep a turn field human-readable: if a (weak) model nested a JSON object in it, surface the
+    inner reasoning/message instead of the blob. Applied to message+reasoning before they leave the
+    runner, so every surface (Band chat, audit trail, the console Theater) shows clean prose."""
+    s = (text or "").strip()
+    if s[:1] in ("{", "["):
+        d = loads_json(s)
+        if d:
+            return str(d.get("reasoning") or d.get("message") or "").strip() or s
+    return s
+
+
 def _deep_reason(spec, user: str, client) -> dict | None:
     """A genuine ``reasoning_effort`` pass for a high-stakes role (the dial the AI/ML API exposes).
 
@@ -655,7 +667,7 @@ def build_runner(*, narrate: Narrator | None = None):
         else:
             content = {"message": p.facts, "reasoning": p.facts}
 
-        payload = {"message": content["message"], "reasoning": content["reasoning"], "facts": p.facts}
+        payload = {"message": _plain(content["message"]), "reasoning": _plain(content["reasoning"]), "facts": p.facts}
         payload["framework"] = spec.framework.value          # the role's declared framework
         if content.get("via"):
             payload["via"] = content["via"]                  # the path that actually produced the turn

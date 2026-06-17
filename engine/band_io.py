@@ -13,6 +13,7 @@ client here; we only call the documented Band tool methods.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from protocol import Envelope, Visibility
@@ -45,6 +46,21 @@ def mentions_for(*identifiers: str) -> list[dict[str, str]]:
     return [{"id": i} for i in identifiers if i]
 
 
+def _readable(text: str | None) -> str:
+    """Best-effort plain text for the human-facing Band surface. If a field accidentally holds a
+    JSON blob (a weak model occasionally nests its structured output), pull the inner
+    message/reasoning so Band never shows raw JSON."""
+    s = (text or "").strip()
+    if s[:1] in ("{", "["):
+        try:
+            obj = json.loads(s)
+        except (ValueError, TypeError):
+            return s
+        if isinstance(obj, dict):
+            return str(obj.get("message") or obj.get("reasoning") or "").strip() or s
+    return s
+
+
 async def emit(
     tools: Any,
     env: Envelope,
@@ -53,14 +69,20 @@ async def emit(
 ) -> Any:
     """Send an envelope through Band, honoring its visibility.
 
-    ``mentions`` are participant ids to @mention (room messages only); routing is the
-    coordinator's decision, not the envelope's.
+    Band is the **human-facing** cross-org surface, so we post the readable message/reasoning —
+    NOT our wire envelope (the structured envelope is persisted to our own audit trail). The
+    machine-readable details ride in event ``metadata`` on the private channel. ``mentions`` are
+    participant ids to @mention (room messages only); routing is the coordinator's decision.
     """
-    content = serialize(env)
+    payload = env.payload or {}
     if env.visibility is Visibility.PRIVATE_EVENT:
-        return await tools.send_event(
-            content,
-            message_type=PRIVATE_EVENT_TYPE,
-            metadata={"marker": _MARKER, "case_id": env.case_id, "kind": env.kind.value, "turn": env.turn},
-        )
+        # audit/thought channel: readable reasoning as content; structure travels in metadata
+        content = _readable(payload.get("reasoning")) or _readable(payload.get("message")) or serialize(env)
+        meta = {"marker": _MARKER, "case_id": env.case_id, "kind": env.kind.value, "turn": env.turn}
+        for k in ("pa_event", "outcome", "denial_reason", "model", "via", "auth_number"):
+            if payload.get(k):
+                meta[k] = payload[k]
+        return await tools.send_event(content, message_type=PRIVATE_EVENT_TYPE, metadata=meta)
+    # routed chat: the human-readable message, never the raw envelope
+    content = _readable(payload.get("message")) or serialize(env)
     return await tools.send_message(content, mentions=mentions_for(*(mentions or [])))

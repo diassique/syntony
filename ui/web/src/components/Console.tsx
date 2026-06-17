@@ -11,7 +11,7 @@ import {
   LayoutDashboard, FolderClosed, Boxes, BarChart3, Settings as SettingsIcon,
   Play, Upload, Copy, Check, ExternalLink, FileText, Braces,
   Lock, Clock, RotateCcw, Gavel, ChevronRight, Loader2, Inbox, FilePlus2, Users, BookOpen, SlidersHorizontal,
-  Cpu, Sparkles, Mic,
+  Cpu, Sparkles, Mic, Menu, X, LogOut,
 } from 'lucide-react'
 import { runsApi, agentsApi, aimlApi, type AgentInfo, type AimlSurface, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
@@ -208,49 +208,74 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ]
   const items = allItems.filter((it) => !it.only || it.only === kind)
+  const [open, setOpen] = useState(false)          // mobile drawer (collapsed by default)
+  const go = (v: View) => { onNav(v); setOpen(false) }  // navigating closes the mobile drawer
+  const initial = ((user.name?.trim() || user.email)[0] || '?').toUpperCase()
+
   return (
-    <aside className="border-b border-line bg-paper/70 backdrop-blur md:sticky md:top-0 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:border-b-0 md:border-r">
-      <div className="flex items-center gap-2.5 px-5 py-5">
-        <a href="#/" className="flex items-center">
-          <Wordmark height={22} />
-        </a>
-        <span className="rounded-md border border-line px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-ink-faint">console</span>
+    <aside className="border-b border-line bg-paper/80 backdrop-blur md:sticky md:top-0 md:flex md:h-screen md:w-64 md:shrink-0 md:flex-col md:border-b-0 md:border-r">
+      {/* header — always visible; carries the mobile menu toggle */}
+      <div className="flex items-center justify-between px-5 py-4 md:py-5">
+        <div className="flex items-center gap-2.5">
+          <a href="#/" className="flex items-center"><Wordmark height={22} /></a>
+          <span className="rounded-md border border-line px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-ink-faint">console</span>
+        </div>
+        <button onClick={() => setOpen((o) => !o)} aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open}
+          className="-mr-1 rounded-lg p-1.5 text-ink-soft transition-colors hover:bg-sunk/60 hover:text-ink md:hidden">
+          {open ? <X size={20} strokeWidth={1.75} /> : <Menu size={20} strokeWidth={1.75} />}
+        </button>
       </div>
 
-      {org && (
-        <div className="mx-5 mb-4 rounded-xl border border-line bg-bone/60 px-3.5 py-3">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-pine/10 font-mono text-[12px] font-bold text-pine ring-1 ring-pine/25">
-              {org.name.slice(0, 1).toUpperCase()}
-            </span>
-            <div className="min-w-0">
-              <div className="truncate text-[13px] font-semibold leading-tight">{org.name}</div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-pine">{org.plan} plan</div>
+      {/* body — drawer on mobile (toggled), full rail on desktop */}
+      <div className={`${open ? 'flex' : 'hidden'} flex-col border-t border-line md:flex md:min-h-0 md:flex-1 md:border-t-0`}>
+        {org && (
+          <div className="mx-3 mt-3 mb-1 rounded-xl border border-line bg-bone/60 px-3.5 py-3 md:mx-5 md:mb-4 md:mt-0">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-pine/10 font-mono text-[12px] font-bold text-pine ring-1 ring-pine/25">
+                {org.name.slice(0, 1).toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-semibold leading-tight">{org.name}</div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-pine">{org.plan} plan · {kind}</div>
+              </div>
+            </div>
+            <div className="mt-2.5 flex items-center gap-1.5 border-t border-line pt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-faint">
+              <span className="livedot h-1.5 w-1.5 rounded-full bg-pine" /> connected to the mesh
             </div>
           </div>
-          <div className="mt-2.5 flex items-center gap-1.5 border-t border-line pt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-faint">
-            <span className="livedot h-1.5 w-1.5 rounded-full bg-pine" /> connected to the mesh
+        )}
+
+        <nav className="flex flex-col gap-1 px-3 py-1 md:flex-1 md:overflow-y-auto">
+          {items.map((it) => (
+            <button key={it.id} onClick={() => go(it.id)}
+              className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left font-mono text-[12px] uppercase tracking-[0.1em] transition-colors ${
+                view === it.id ? 'bg-pine/10 text-pine' : 'text-ink-soft hover:bg-sunk/60 hover:text-ink'
+              }`}>
+              <it.icon size={15} strokeWidth={1.75} className="shrink-0" />
+              {it.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* account — avatar + email + real action buttons (shown on mobile too, inside the drawer) */}
+        <div className="mt-auto border-t border-line px-3 py-3">
+          <div className="flex items-center gap-2.5 rounded-lg bg-bone/50 px-2.5 py-2">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink font-mono text-[12px] font-semibold text-bone">{initial}</span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12.5px] font-medium leading-tight text-ink">{user.name?.trim() || 'Signed in'}</div>
+              <div className="truncate font-mono text-[10.5px] leading-tight text-ink-faint">{user.email}</div>
+            </div>
           </div>
-        </div>
-      )}
-
-      <nav className="flex gap-1 px-3 md:flex-col">
-        {items.map((it) => (
-          <button key={it.id} onClick={() => onNav(it.id)}
-            className={`flex flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-left font-mono text-[12px] uppercase tracking-[0.1em] transition-colors md:flex-none ${
-              view === it.id ? 'bg-pine/10 text-pine' : 'text-ink-soft hover:bg-sunk/60 hover:text-ink'
-            }`}>
-            <it.icon size={15} strokeWidth={1.75} className="shrink-0" />
-            {it.label}
-          </button>
-        ))}
-      </nav>
-
-      <div className="mt-auto hidden border-t border-line px-5 py-4 md:block">
-        <div className="truncate font-mono text-[11px] text-ink-soft">{user.email}</div>
-        <div className="mt-2 flex items-center gap-4 font-mono text-[11px] uppercase tracking-[0.1em]">
-          <a href="#/live" className="text-ink-soft transition-colors hover:text-ink">Live demo</a>
-          <button onClick={onSignOut} className="text-ink-soft transition-colors hover:text-coral">Sign out</button>
+          <div className="mt-2 flex items-center gap-2">
+            <a href="#/live"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line px-2.5 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine">
+              <ExternalLink size={13} strokeWidth={1.75} /> Live
+            </a>
+            <button onClick={onSignOut}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line px-2.5 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-soft transition-colors hover:border-coral/50 hover:bg-coral/[0.06] hover:text-coral">
+              <LogOut size={13} strokeWidth={1.75} /> Sign out
+            </button>
+          </div>
         </div>
       </div>
     </aside>
@@ -582,6 +607,13 @@ function Theater({ runId, orgName, onBack, onComplete }: {
   }, [detail])
   const counterparty = mySide === 'provider' ? 'the payer' : 'the provider'
 
+  // keep the newest turn in view as the negotiation streams (scrolls the frame, not the page)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [turns.length])
+
   const back = (
     <button onClick={onBack} className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft transition-colors hover:text-ink">← All cases</button>
   )
@@ -660,25 +692,33 @@ function Theater({ runId, orgName, onBack, onComplete }: {
       {overturned && <OverturnBanner />}
       {awaiting && <HitlPanel events={detail.events} canDecide={mySide === 'payer'} deciding={deciding} onDecide={decide} />}
 
-      <Lanes mySide={mySide} myOrg={orgName} />
-
-      {live && turns.length === 0 && (
-        <p className="mt-4 flex items-center gap-2 font-mono text-[12px] text-ink-faint">
-          <Loader2 size={13} className="animate-spin" /> Negotiating across the mesh — turns will appear as they're posted…
+      {/* the negotiation, framed: messages scroll inside the frame so a long case never stretches the page */}
+      <section className="mt-5 overflow-hidden rounded-xl border border-line bg-paper">
+        <div className="flex items-center justify-between border-b border-line bg-bone/40 px-4 py-2.5">
+          <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
+            Negotiation {live && <span className="livedot h-1.5 w-1.5 rounded-full bg-coral" />}
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">{turns.length} turns</span>
+        </div>
+        <Lanes mySide={mySide} myOrg={orgName} />
+        <div ref={scrollRef} className="max-h-[60vh] overflow-y-auto px-4 pb-4">
+          {live && turns.length === 0 && (
+            <p className="mt-4 flex items-center gap-2 font-mono text-[12px] text-ink-faint">
+              <Loader2 size={13} className="animate-spin" /> Negotiating across the mesh — turns will appear as they're posted…
+            </p>
+          )}
+          <ol className="relative mt-2">
+            {/* the spine */}
+            <div className="pointer-events-none absolute bottom-2 left-[7px] top-2 w-px bg-line sm:left-1/2 sm:-translate-x-1/2" />
+            {turns.map((t, i) => (
+              <TurnRow key={t.turn} t={t} mySide={mySide} myOrg={orgName} counterparty={counterparty} index={i} />
+            ))}
+          </ol>
+        </div>
+        <p className="flex items-center justify-center gap-2 border-t border-line bg-bone/40 px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+          <Lock size={11} strokeWidth={1.75} className="text-coral" /> private reasoning is scoped to its own organization — never the other side
         </p>
-      )}
-
-      <ol className="relative mt-2">
-        {/* the spine */}
-        <div className="pointer-events-none absolute bottom-2 left-[7px] top-2 w-px bg-line sm:left-1/2 sm:-translate-x-1/2" />
-        {turns.map((t, i) => (
-          <TurnRow key={t.turn} t={t} mySide={mySide} myOrg={orgName} counterparty={counterparty} index={i} />
-        ))}
-      </ol>
-
-      <p className="mt-6 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-        <Lock size={11} strokeWidth={1.75} className="text-coral" /> private reasoning is scoped to its own organization — never the other side
-      </p>
+      </section>
     </div>
   )
 }
@@ -729,7 +769,7 @@ function Lanes({ mySide, myOrg }: { mySide: string; myOrg: string }) {
   const left = { label: mySide === 'provider' ? myOrg : 'Provider', dot: 'bg-pine', isYou: mySide === 'provider' }
   const right = { label: mySide === 'payer' ? myOrg : 'Payer', dot: 'bg-ink', isYou: mySide === 'payer' }
   return (
-    <div className="mt-8 mb-4 hidden items-center justify-between border-y border-line py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft sm:flex">
+    <div className="hidden items-center justify-between border-b border-line bg-paper px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft sm:flex">
       <span className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${left.dot}`} />{left.label}{left.isYou && <YouTag />}</span>
       <span className="text-ink-faint">shared case room</span>
       <span className="flex items-center gap-2">{right.label}{right.isYou && <YouTag />}<span className={`h-2 w-2 rounded-full ${right.dot}`} /></span>

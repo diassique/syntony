@@ -31,17 +31,30 @@ def agent_client(api_key: str, base_url: str = "https://app.band.ai") -> RestCli
     return RestClient(api_key=api_key, base_url=base_url)
 
 
+def add_participants(adder: RestClient, room_id: str, agent_ids) -> None:
+    """Best-effort: add each agent id to the room as ``adder``. A failed add (e.g. a flaky or
+    not-yet-contacted cross-account agent) is logged and skipped, not raised — the agents that
+    do join can still post. Same-account adds always work; cross-account needs a prior contact,
+    so callers add their OWN account's agents."""
+    for pid in dict.fromkeys(agent_ids):
+        if not pid:
+            continue
+        try:
+            adder.agent_api_participants.add_agent_chat_participant(
+                chat_id=room_id, participant=ParticipantRequest(participant_id=pid, role="member")
+            )
+        except Exception as e:  # noqa: BLE001 — one bad add must not sink the room
+            print(f"add_participants: could not add {pid[:8]}… ({type(e).__name__}: {str(e)[:100]})")
+
+
 def ensure_room(creator: RestClient, *participant_agent_ids: str, room_id: str | None = None) -> str:
-    """Return ``room_id`` if given, else create a fresh chat (as ``creator``) and add the
-    given external agent ids as participants. Mirrors spike 03/04 exactly."""
+    """Return ``room_id`` if given, else create a fresh chat (as ``creator``) and add the given
+    agent ids as participants (best-effort). Mirrors spike 03/04."""
     if room_id:
         return room_id
     created = creator.agent_api_chats.create_agent_chat(chat=ChatRoomRequest())
     rid = created.data.id
-    for pid in participant_agent_ids:
-        creator.agent_api_participants.add_agent_chat_participant(
-            chat_id=rid, participant=ParticipantRequest(participant_id=pid, role="member")
-        )
+    add_participants(creator, rid, participant_agent_ids)
     return rid
 
 

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FilePlus2, Inbox, ArrowLeft, Plus, X, Check, ShieldCheck, ShieldAlert, Clock,
   Stethoscope, Gavel, Send, RotateCcw, FileSearch, AlertTriangle, Loader2, CheckCircle2,
-  Users, Award,
+  Users, Award, Lock,
 } from 'lucide-react'
 import {
   paApi, patientsApi, PA_STATUS_LABEL,
@@ -730,6 +730,15 @@ function Waiting({ d }: { d: PaDetail }) {
 
 // ---- timeline ------------------------------------------------------------------
 
+function fmtTime(iso?: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+/** The case transcript as a two-party chat: provider on the left, payer on the right. Messages
+ *  scroll inside a fixed-height frame so a long negotiation never stretches the page. Each bubble
+ *  carries its time + PA-event badges; the side's own private reasoning shows beneath its bubble. */
 function Timeline({ items }: { items: PaTimelineItem[] }) {
   const room = items.filter((i) => i.visibility === 'room')
   const priv = useMemo(() => {
@@ -737,37 +746,56 @@ function Timeline({ items }: { items: PaTimelineItem[] }) {
     for (const i of items) if (i.visibility === 'private_event' && i.reasoning) m.set(i.turn, i.reasoning)
     return m
   }, [items])
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // keep the latest message in view as the live case streams in (scrolls the frame, not the page)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [room.length])
   if (room.length === 0) return null
+
   return (
-    <section className="rounded-md border border-line bg-paper p-5">
-      <h2 className="mb-4 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">Case timeline</h2>
-      <ol className="space-y-4">
+    <section className="overflow-hidden rounded-xl border border-line bg-paper">
+      <header className="flex items-center justify-between border-b border-line bg-bone/40 px-4 py-2.5">
+        <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">Case timeline</h2>
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">{room.length} messages</span>
+      </header>
+      <div ref={scrollRef} className="max-h-[58vh] space-y-3 overflow-y-auto px-4 py-4">
         {room.map((e, i) => {
           const provider = e.author.startsWith('provider')
+          const reasoning = priv.get(e.turn)
           return (
-            <li key={`${e.turn}-${i}`} className="flex gap-3">
-              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${provider ? 'bg-pine' : 'bg-ink'}`} aria-hidden />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[13px] font-medium text-ink">{authorLabel(e.author)}</span>
-                  {e.pa_event && <Badge tone="neutral">{e.pa_event.replace(/_/g, ' ').toLowerCase()}</Badge>}
-                  {e.outcome && <Badge tone={e.outcome === 'APPROVE' ? 'pine' : 'coral'}>{e.outcome}</Badge>}
-                  {e.gold_card && <Badge tone="coral">gold card</Badge>}
-                  {e.overturned && <Badge tone="pine">overturned</Badge>}
-                  {e.hitl && <Badge tone="ink">human</Badge>}
-                  {e.denial_reason && <Badge tone="coral">{e.denial_reason}</Badge>}
-                  {e.via && <span className="font-mono text-[10px] text-ink-faint">{e.via}</span>}
+            <div key={`${e.turn}-${i}`} className={`flex flex-col ${provider ? 'items-start' : 'items-end'}`}>
+              <div className={`max-w-[85%] rounded-2xl border px-3.5 py-2.5 ${
+                provider ? 'rounded-tl-sm border-pine/20 bg-pine/[0.05]' : 'rounded-tr-sm border-ink/15 bg-sunk/60'}`}>
+                <div className="mb-1 flex items-center gap-2">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${provider ? 'bg-pine' : 'bg-ink'}`} aria-hidden />
+                  <span className="text-[12.5px] font-semibold text-ink">{authorLabel(e.author)}</span>
+                  {e.created_at && <span className="ml-auto pl-2 font-mono text-[10px] tabular-nums text-ink-faint">{fmtTime(e.created_at)}</span>}
                 </div>
-                {e.message && <p className="mt-0.5 text-[13px] text-ink-soft">{e.message}</p>}
-                {e.auth_number && <p className="mt-0.5 font-mono text-[11px] text-pine">Authorization #{e.auth_number}</p>}
-                {priv.get(e.turn) && (
-                  <p className="mt-1 border-l-2 border-line pl-2 text-[12px] italic text-ink-faint">Private reasoning · {priv.get(e.turn)}</p>
+                {e.message && <p className="text-[13px] leading-snug text-ink">{e.message}</p>}
+                {(e.pa_event || e.outcome || e.gold_card || e.overturned || e.hitl || e.denial_reason) && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    {e.pa_event && <Badge tone="neutral">{e.pa_event.replace(/_/g, ' ').toLowerCase()}</Badge>}
+                    {e.outcome && <Badge tone={e.outcome === 'APPROVE' ? 'pine' : 'coral'}>{e.outcome}</Badge>}
+                    {e.gold_card && <Badge tone="coral">gold card</Badge>}
+                    {e.overturned && <Badge tone="pine">overturned</Badge>}
+                    {e.hitl && <Badge tone="ink">human</Badge>}
+                    {e.denial_reason && <Badge tone="coral">{e.denial_reason}</Badge>}
+                  </div>
+                )}
+                {e.auth_number && <p className="mt-1.5 font-mono text-[11px] text-pine">Authorization #{e.auth_number}</p>}
+                {reasoning && (
+                  <p className="mt-2 border-t border-line/70 pt-2 text-[11.5px] italic leading-snug text-ink-faint">
+                    <Lock size={10} strokeWidth={1.75} className="mr-1 inline -translate-y-px" />{reasoning}
+                  </p>
                 )}
               </div>
-            </li>
+              {e.via && <span className="mt-1 px-1 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-faint">{e.via.replace(/_/g, ' ')}</span>}
+            </div>
           )
         })}
-      </ol>
+      </div>
     </section>
   )
 }

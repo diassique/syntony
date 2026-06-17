@@ -238,6 +238,7 @@ export interface PaTimelineItem {
   author: string
   kind: string
   visibility: 'room' | 'private_event'
+  created_at?: string | null
   message: string
   reasoning: string
   pa_event?: string | null

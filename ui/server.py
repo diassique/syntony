@@ -460,6 +460,7 @@ def _pa_detail(sess: Any, run: Any, org_id: str, side: str | None) -> dict:
     ).all()
     timeline = [{
         "turn": e.turn, "author": e.author, "kind": e.kind, "visibility": e.visibility,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
         "message": (e.payload or {}).get("message", ""),
         "reasoning": (e.payload or {}).get("reasoning", ""),
         "pa_event": (e.payload or {}).get("pa_event"),

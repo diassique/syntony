@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import Any
 
 from control import ingest, seed, service
 from control.db import session as open_session
@@ -71,25 +72,69 @@ def _build_tools_for(case_id: str, room_id: str | None = None):
     interactive workflow); ``None`` opens a fresh room per run.
     """
     try:
-        from engine.band_room import RestRoomTools, agent_client, ensure_room
+        from engine.band_room import RestRoomTools, add_participants, agent_client, ensure_room
 
         rest_url = os.environ.get("BAND_REST_URL", "https://app.band.ai")
-        clinic_id = os.environ["CLINIC_AGENT_ID"]
-        payer_id = os.environ["PAYER_AGENT_ID"]
-        clinic = agent_client(os.environ["CLINIC_AGENT_API_KEY"], rest_url)
-        payer = agent_client(os.environ["PAYER_AGENT_API_KEY"], rest_url)
-        room = ensure_room(clinic, payer_id, room_id=room_id)  # reuse across segments when given
+        clinic_id = os.environ["CLINIC_AGENT_ID"]            # provider primary (Clinic Intake)
+        clinic_key = os.environ["CLINIC_AGENT_API_KEY"]
+        payer_id = os.environ["PAYER_AGENT_ID"]              # payer primary (Payer Reviewer)
+        payer_key = os.environ["PAYER_AGENT_API_KEY"]
 
-        mention_map = {rid: (payer_id if spec.side is Side.PAYER else clinic_id)
-                       for rid, spec in ROLES.items()}
-        clinic_tools = RestRoomTools(clinic, room, mention_map=mention_map,
-                                     self_id=clinic_id, default_mention=payer_id)
-        payer_tools = RestRoomTools(payer, room, mention_map=mention_map,
-                                    self_id=payer_id, default_mention=clinic_id)
+        # Resolve each role to its OWN Band agent identity (env stem PROVIDER_COUNSEL_AGENT_ID/…),
+        # falling back to the side primary when a specialist agent isn't provisioned. This is what
+        # makes the full ~10-agent cast appear as distinct participants in the Band room.
+        def resolve(rid: str, spec) -> tuple[str, str]:
+            stem = rid.upper().replace(".", "_")
+            aid = os.environ.get(f"{stem}_AGENT_ID", "").strip()
+            akey = os.environ.get(f"{stem}_AGENT_API_KEY", "").strip()
+            if aid and akey:
+                return aid, akey
+            return (payer_id, payer_key) if spec.side is Side.PAYER else (clinic_id, clinic_key)
+
+        ident = {rid: resolve(rid, spec) for rid, spec in ROLES.items() if not spec.is_human}
+        mention_map = {rid: aid for rid, (aid, _) in ident.items()}
+        for rid, spec in ROLES.items():  # human MD has no agent → route mentions to its side primary
+            if spec.is_human:
+                mention_map[rid] = payer_id if spec.side is Side.PAYER else clinic_id
+
+        # one client per distinct agent uuid (primaries + provisioned specialists)
+        agents: dict[str, str] = {clinic_id: clinic_key, payer_id: payer_key}
+        for aid, akey in ident.values():
+            agents.setdefault(aid, akey)
+        clinic = agent_client(clinic_key, rest_url)
+        clients: dict[str, Any] = {clinic_id: clinic}
+        for aid, akey in agents.items():
+            clients.setdefault(aid, agent_client(akey, rest_url))
+
+        # Participants must be added by an agent on the SAME account (cross-account needs a prior
+        # contact, which only the two primaries have). The env-var names are crossed: provider-side
+        # agents live on the clinic-primary's account, payer-side on the payer-primary's account —
+        # so each primary adds its own side's specialists. The clinic creator also adds the payer
+        # primary (their contact is already established).
+        provider_specialists = [aid for rid, (aid, _) in ident.items()
+                                if ROLES[rid].side is Side.PROVIDER and aid != clinic_id]
+        payer_specialists = [aid for rid, (aid, _) in ident.items()
+                             if ROLES[rid].side is Side.PAYER and aid != payer_id]
+        fresh = room_id is None
+        room = ensure_room(clinic, *provider_specialists, payer_id, room_id=room_id)
+        if fresh:  # payer primary adds its own-account specialists (same-account add is allowed)
+            add_participants(clients[payer_id], room, payer_specialists)
+
+        # a transport per role: posts under that role's own agent; defaults to mentioning the
+        # counterparty primary so every message satisfies Band's ≥1-mention rule.
+        tools_by_role: dict[str, RestRoomTools] = {}
+        for rid, (aid, _) in ident.items():
+            default = clinic_id if ROLES[rid].side is Side.PAYER else payer_id
+            tools_by_role[rid] = RestRoomTools(clients[aid], room, mention_map=mention_map,
+                                               self_id=aid, default_mention=default)
+        clinic_primary = RestRoomTools(clinic, room, mention_map=mention_map, self_id=clinic_id, default_mention=payer_id)
+        payer_primary = RestRoomTools(clients[payer_id], room, mention_map=mention_map, self_id=payer_id, default_mention=clinic_id)
 
         def tools_for(env: Envelope):
-            spec = ROLES.get(env.author)
-            return payer_tools if (spec and spec.side is Side.PAYER) else clinic_tools
+            if env.author in tools_by_role:
+                return tools_by_role[env.author]
+            spec = ROLES.get(env.author)  # human MD / unknown → side primary
+            return payer_primary if (spec and spec.side is Side.PAYER) else clinic_primary
 
         return tools_for, room
     except Exception as e:  # noqa: BLE001 — Band is optional for the live theater

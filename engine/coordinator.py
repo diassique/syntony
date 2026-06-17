@@ -24,10 +24,13 @@ domains. ``tools`` is any Band ``AgentToolsProtocol`` (real ``AgentTools`` or
 from __future__ import annotations
 
 import inspect
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from engine import band_io
+
+log = logging.getLogger(__name__)
 from protocol import Envelope, State, TERMINAL, is_allowed
 
 
@@ -136,7 +139,12 @@ async def run_case(
 
         transport = tools_for(move.envelope) if tools_for is not None else tools
         if transport is not None:
-            await band_io.emit(transport, move.envelope, mentions=list(move.mentions))
+            try:
+                await band_io.emit(transport, move.envelope, mentions=list(move.mentions))
+            except Exception as e:  # noqa: BLE001 — Band is best-effort transport; the audit trail
+                # is built from ctx.history below, so a failed post must NOT fail the negotiation.
+                log.warning("coordinator: Band emit failed for turn %s (%s: %s) — continuing audit-only",
+                            ctx.turn, type(e).__name__, str(e)[:120])
 
         ctx.history.append(move.envelope)
         ctx.state = move.next_state

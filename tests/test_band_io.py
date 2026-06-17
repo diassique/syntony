@@ -26,14 +26,24 @@ def test_parse_returns_none_on_free_text():
     assert band_io.parse("{not valid json") is None
 
 
-def test_emit_room_sends_message_with_mentions():
+def test_emit_room_sends_readable_message_with_mentions():
     tools = FakeAgentTools()
-    env = _envelope(visibility=Visibility.ROOM)
+    env = _envelope(visibility=Visibility.ROOM, payload={"message": "Please review this case.", "reasoning": "x"})
     asyncio.run(band_io.emit(tools, env, mentions=["payer.reviewer"]))
     tools.assert_message_sent(count=1)
     sent = tools.messages_sent[0]
-    assert band_io.parse(sent["content"]) == env
+    # Band gets the human-readable message, NOT the wire envelope JSON.
+    assert sent["content"] == "Please review this case."
+    assert band_io.parse(sent["content"]) is None
     assert sent["mentions"] == [{"id": "payer.reviewer"}]
+
+
+def test_emit_unwraps_a_nested_json_blob():
+    tools = FakeAgentTools()
+    blob = '{"message": "Authorization approved.", "reasoning": "criteria met"}'
+    env = _envelope(visibility=Visibility.ROOM, payload={"message": blob})
+    asyncio.run(band_io.emit(tools, env))
+    assert tools.messages_sent[0]["content"] == "Authorization approved."
 
 
 def test_emit_private_event_uses_audit_channel():
