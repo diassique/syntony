@@ -31,3 +31,6 @@ spikes/
 
 # dev SQLite (control plane uses Postgres in prod)
 syntony.db
+
+# submission prep (internal)
+PITCH.md
