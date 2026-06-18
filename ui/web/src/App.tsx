@@ -3,6 +3,7 @@ import Landing from './components/Landing'
 import Dashboard from './components/Dashboard'
 import Auth from './components/Auth'
 import Console from './components/Console'
+import NotFound from './components/NotFound'
 import { AuthProvider, useAuth } from './auth'
 import { usePathname, Redirect, interceptLinks } from './router'
 
@@ -26,7 +27,8 @@ function Routes() {
     if (!user) return <Redirect to="/login" />
     return <Console />
   }
-  return <Landing />
+  if (path === '/') return <Landing />
+  return <NotFound />
 }
 
 export default function App() {
