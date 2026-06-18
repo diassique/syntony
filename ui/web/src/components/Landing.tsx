@@ -367,9 +367,9 @@ export default function Landing() {
             <a href="#security" className="hidden transition-colors hover:text-pine md:inline">Privacy</a>
             <a href={GITHUB} target="_blank" rel="noreferrer" className="hidden transition-colors hover:text-pine sm:inline">Source</a>
             {!loading && (user
-              ? <a href="#/app" className="font-semibold text-pine transition-colors hover:text-pine-deep">Console →</a>
-              : <a href="#/login" className="transition-colors hover:text-pine">Sign in</a>)}
-            <a href="#/live" className="flex items-center gap-1.5 rounded-sm bg-ink px-3 py-1.5 text-bone transition-colors hover:bg-pine">
+              ? <a href="/app" className="font-semibold text-pine transition-colors hover:text-pine-deep">Console →</a>
+              : <a href="/login" className="transition-colors hover:text-pine">Sign in</a>)}
+            <a href="/live" className="flex items-center gap-1.5 rounded-sm bg-ink px-3 py-1.5 text-bone transition-colors hover:bg-pine">
               <span className="livedot h-1.5 w-1.5 rounded-full bg-coral" /> Live
             </a>
           </div>
@@ -398,7 +398,7 @@ export default function Landing() {
               denials, and reach a decision — a human on the edge cases, every move on the record.
             </p>
             <div data-reveal style={{ transitionDelay: '180ms' }} className="mt-9 flex flex-wrap items-center gap-3">
-              <a href="#/live" className="rounded-sm bg-pine px-5 py-3 font-medium text-bone transition-colors hover:bg-pine-deep">Watch it live →</a>
+              <a href="/live" className="rounded-sm bg-pine px-5 py-3 font-medium text-bone transition-colors hover:bg-pine-deep">Watch it live →</a>
               <a href={GITHUB} target="_blank" rel="noreferrer" className="rounded-sm border border-ink/25 px-5 py-3 font-medium text-ink transition-colors hover:border-ink/60">View source</a>
               <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">two agents · one frequency</span>
             </div>
@@ -551,7 +551,7 @@ export default function Landing() {
               resubmits automatically. The deny → appeal → <span className="font-semibold text-pine">overturn</span> loop
               turns abandoned claims back into paid care.
             </p>
-            <a href="#/live" className="mt-7 inline-block rounded-sm bg-pine px-5 py-3 font-medium text-bone transition-colors hover:bg-pine-deep">See an overturn live →</a>
+            <a href="/live" className="mt-7 inline-block rounded-sm bg-pine px-5 py-3 font-medium text-bone transition-colors hover:bg-pine-deep">See an overturn live →</a>
           </div>
           <div data-reveal style={{ transitionDelay: '90ms' }} className="lg:col-span-6">
             <Frame className="bg-paper">
@@ -628,8 +628,8 @@ export default function Landing() {
         <h2 className="mx-auto max-w-2xl font-display text-3xl font-medium tracking-tight sm:text-[2.6rem]">Watch a prior-auth case settle, live.</h2>
         <p className="mx-auto mt-4 max-w-lg text-ink-soft">Open the demo, or sign in and run a case yourself — a real cross-org negotiation streams into your audit trail, turn by turn.</p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <a href="#/live" className="rounded-sm bg-pine px-6 py-3 font-medium text-bone transition-colors hover:bg-pine-deep">Open the live demo →</a>
-          <a href="#/login" className="rounded-sm border border-ink/25 px-6 py-3 font-medium text-ink transition-colors hover:border-ink/60">Sign in to the console</a>
+          <a href="/live" className="rounded-sm bg-pine px-6 py-3 font-medium text-bone transition-colors hover:bg-pine-deep">Open the live demo →</a>
+          <a href="/login" className="rounded-sm border border-ink/25 px-6 py-3 font-medium text-ink transition-colors hover:border-ink/60">Sign in to the console</a>
         </div>
       </section>
 
@@ -651,7 +651,7 @@ export default function Landing() {
             <Wordmark height={20} />
             <p className="mt-4 max-w-xs text-[13px] leading-relaxed text-ink-soft">Cross-organization prior authorization between providers and payers — agents tuning to the same frequency.</p>
           </div>
-          <FooterCol title="Product" links={[['Live demo', '#/live'], ['Sign in', '#/login'], ['Signal path', '#how'], ['Channels', '#agents']]} />
+          <FooterCol title="Product" links={[['Live demo', '/live'], ['Sign in', '/login'], ['Signal path', '#how'], ['Channels', '#agents']]} />
           <FooterCol title="Project" links={[['GitHub', GITHUB], ['Privacy model', '#security'], ['Architecture', '#']]} external={[GITHUB]} />
         </div>
         <div className="border-t border-line">

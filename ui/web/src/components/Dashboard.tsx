@@ -40,6 +40,9 @@ export default function Dashboard() {
   const [input, setInput] = useState('')
 
   useEffect(() => {
+    // A specific room can be deep-linked (?room=…); otherwise fall back to the server's default.
+    const qRoom = new URLSearchParams(window.location.search).get('room')
+    if (qRoom) { setRoom(qRoom); setInput(qRoom); return }
     fetch('/api/state')
       .then((r) => r.json())
       .then((d) => { if (d.room) { setRoom(d.room); setInput(d.room) } })
@@ -52,7 +55,7 @@ export default function Dashboard() {
   return (
     <div className="flex h-full flex-col bg-bone">
       <header className="flex items-center gap-3 border-b border-line bg-bone px-5 py-3">
-        <a href="#/" className="flex items-center gap-2 transition-opacity hover:opacity-70">
+        <a href="/" className="flex items-center gap-2 transition-opacity hover:opacity-70">
           <Wordmark height={20} />
         </a>
         <span className="hidden font-mono text-[11px] text-ink-faint sm:inline">· each column = what that account actually sees</span>

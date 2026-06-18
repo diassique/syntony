@@ -1,9 +1,10 @@
 /** Login / signup page (one component, two modes). Clinical Bone styling to match
- * the landing. On success the auth context is populated and we route to #/app. */
+ * the landing. On success the auth context is populated and we route to /app. */
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError } from '../api'
 import { useAuth } from '../auth'
+import { navigate } from '../router'
 import { Wordmark } from './Logo'
 
 export default function Auth({ mode }: { mode: 'login' | 'signup' }) {
@@ -18,7 +19,7 @@ export default function Auth({ mode }: { mode: 'login' | 'signup' }) {
   const isSignup = mode === 'signup'
 
   // Already signed in → no reason to be on this page.
-  useEffect(() => { if (user) window.location.hash = '#/app' }, [user])
+  useEffect(() => { if (user) navigate('/app', { replace: true }) }, [user])
 
   async function onSubmit(e: FormEvent): Promise<void> {
     e.preventDefault()
@@ -30,7 +31,7 @@ export default function Auth({ mode }: { mode: 'login' | 'signup' }) {
       } else {
         await login(email, password)
       }
-      window.location.hash = '#/app'
+      navigate('/app')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.')
     } finally {
@@ -42,7 +43,7 @@ export default function Auth({ mode }: { mode: 'login' | 'signup' }) {
     <div className="flex min-h-full flex-col">
       <nav className="border-b border-line/70">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-4">
-          <a href="#/" className="flex items-center gap-3">
+          <a href="/" className="flex items-center gap-3">
             <Wordmark height={22} />
           </a>
         </div>
@@ -92,7 +93,7 @@ export default function Auth({ mode }: { mode: 'login' | 'signup' }) {
 
           <p className="mt-6 text-[13px] text-ink-soft">
             {isSignup ? 'Already have an account? ' : "Don't have an account? "}
-            <a href={isSignup ? '#/login' : '#/signup'} className="font-medium text-pine hover:text-pine-deep">
+            <a href={isSignup ? '/login' : '/signup'} className="font-medium text-pine hover:text-pine-deep">
               {isSignup ? 'Sign in' : 'Create one'}
             </a>
           </p>

@@ -4,6 +4,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { authApi, type Org, type User } from './api'
+import { navigate } from './router'
 
 interface AuthState {
   user: User | null
@@ -47,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function logout(): Promise<void> {
     try { await authApi.logout() } finally {
       setUser(null); setOrg(null)
-      window.location.hash = '#/login'
+      navigate('/login')
     }
   }
 

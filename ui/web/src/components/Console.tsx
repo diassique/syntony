@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { runsApi, agentsApi, aimlApi, type AgentInfo, type AimlSurface, type AuditEvent, type Insights, type RunDetail, type RunSummary } from '../api'
 import { useAuth } from '../auth'
+import { navigate, useLocation } from '../router'
 import { Wordmark } from './Logo'
 import { Badge, Button, Select } from './ui'
 import { PaSubmit, PaWorklist, PaCase, PatientsView } from './PriorAuth'
@@ -23,18 +24,35 @@ import Config from './Config'
 
 type View = 'overview' | 'guide' | 'patients' | 'prior_auth' | 'submit' | 'cases' | 'agents' | 'insights' | 'aiml' | 'config' | 'settings'
 
+/** Each console view ↔ its URL slug under /app (overview = bare /app). */
+const VIEW_SLUG: Record<View, string> = {
+  overview: '', patients: 'patients', prior_auth: 'prior-auth', submit: 'new-request',
+  cases: 'cases', agents: 'agents', insights: 'insights', aiml: 'aiml',
+  config: 'config', guide: 'guide', settings: 'settings',
+}
+const SLUG_VIEW: Record<string, View> = Object.fromEntries(
+  Object.entries(VIEW_SLUG).map(([v, s]) => [s, v as View]),
+) as Record<string, View>
+const viewPath = (v: View): string => (VIEW_SLUG[v] ? `/app/${VIEW_SLUG[v]}` : '/app')
+
 export default function Console() {
   const { user, org, logout } = useAuth()
   const [runs, setRuns] = useState<RunSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [view, setView] = useState<View>('overview')
-  const [openRun, setOpenRun] = useState<string | null>(null)
-  const [openPa, setOpenPa] = useState<string | null>(null)
-  const [preselectPatient, setPreselectPatient] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
 
   const refresh = () => runsApi.list().then(setRuns).catch((e) => setError(String(e?.message || e)))
   useEffect(() => { refresh() }, [])
+
+  // ── URL is the source of truth. /app/<section>[/<id>] → view + opened detail. ──
+  const loc = useLocation()
+  const [rawPath, rawSearch = ''] = loc.split('?')
+  const [seg, detailId] = rawPath.replace(/^\/app\/?/, '').split('/')
+  const urlView: View = SLUG_VIEW[seg] ?? 'overview'
+  const openRun = urlView === 'cases' ? (detailId || null) : null          // /app/cases/:id → Theater
+  const openPa = urlView === 'prior_auth' ? (detailId || null) : null      // /app/prior-auth/:id → PaCase
+  const preselectPatient = urlView === 'submit'
+    ? new URLSearchParams(rawSearch).get('patient') : null
 
   if (!user) return null // App guards this route.
 
@@ -43,13 +61,15 @@ export default function Console() {
   const kind: 'provider' | 'payer' = org?.kind ?? 'provider'
   const restricted: Partial<Record<View, 'provider' | 'payer'>> =
     { patients: 'provider', submit: 'provider', config: 'payer' }
-  const activeView: View = restricted[view] && restricted[view] !== kind ? 'overview' : view
+  const activeView: View = restricted[urlView] && restricted[urlView] !== kind ? 'overview' : urlView
 
-  const open = (id: string) => setOpenRun(id)
-  const go = (v: View) => { setOpenRun(null); setOpenPa(null); if (v !== 'submit') setPreselectPatient(null); setView(v) }
-  const openPaCase = (id: string) => { setOpenRun(null); setOpenPa(id) }
-  const onSubmitted = (id: string) => { setView('prior_auth'); setOpenPa(id) }
-  const newRequestFor = (patientId: string) => { setPreselectPatient(patientId); setOpenPa(null); setView('submit') }
+  const open = (id: string) => navigate(`/app/cases/${id}`)
+  const go = (v: View) => navigate(viewPath(v))
+  const openPaCase = (id: string) => navigate(`/app/prior-auth/${id}`)
+  const onSubmitted = (id: string) => navigate(`/app/prior-auth/${id}`)
+  const newRequestFor = (patientId: string) => navigate(`/app/new-request?patient=${encodeURIComponent(patientId)}`)
+  const closeRun = () => navigate('/app/cases')
+  const closePa = () => navigate('/app/prior-auth')
 
   // Trigger a real cross-org negotiation, then drop straight into its Theater to watch it stream.
   const runLiveCase = async (caseName?: string) => {
@@ -58,7 +78,7 @@ export default function Console() {
     setError(null)
     try {
       const { run_id } = await runsApi.start(caseName)
-      setOpenRun(run_id)
+      navigate(`/app/cases/${run_id}`)
       refresh()
     } catch (e) {
       setError(String((e as Error)?.message || e))
@@ -74,7 +94,7 @@ export default function Console() {
     setError(null)
     try {
       const { run_id } = await runsApi.intake(payload)
-      setOpenRun(run_id)
+      navigate(`/app/cases/${run_id}`)
       refresh()
     } catch (e) {
       setError(String((e as Error)?.message || e))
@@ -90,9 +110,9 @@ export default function Console() {
         <div className="mx-auto max-w-5xl px-6 py-10 sm:px-10">
           {openRun ? (
             <Theater runId={openRun} orgName={org?.name ?? 'Your organization'}
-              onBack={() => setOpenRun(null)} onComplete={refresh} />
+              onBack={closeRun} onComplete={refresh} />
           ) : openPa ? (
-            <PaCase runId={openPa} onBack={() => setOpenPa(null)} />
+            <PaCase runId={openPa} onBack={closePa} />
           ) : activeView === 'submit' ? (
             <PaSubmit onSubmitted={onSubmitted} initialPatientId={preselectPatient} />
           ) : activeView === 'prior_auth' ? (
@@ -217,7 +237,7 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
       {/* header — always visible; carries the mobile menu toggle */}
       <div className="flex items-center justify-between px-5 py-4 md:py-5">
         <div className="flex items-center gap-2.5">
-          <a href="#/" className="flex items-center"><Wordmark height={22} /></a>
+          <a href="/" className="flex items-center"><Wordmark height={22} /></a>
           <span className="rounded-md border border-line px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-ink-faint">console</span>
         </div>
         <button onClick={() => setOpen((o) => !o)} aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open}
@@ -267,7 +287,7 @@ function Sidebar({ org, user, view, onNav, onSignOut }: {
             </div>
           </div>
           <div className="mt-2 flex items-center gap-2">
-            <a href="#/live"
+            <a href="/live" target="_blank" rel="noreferrer"
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-line px-2.5 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine">
               <ExternalLink size={13} strokeWidth={1.75} /> Live
             </a>
@@ -673,7 +693,7 @@ function Theater({ runId, orgName, onBack, onComplete }: {
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <RunIdChip id={run.id} />
         {run.room_id && (
-          <a href={`/?room=${run.room_id}#/live`} target="_blank" rel="noreferrer"
+          <a href={`/live?room=${run.room_id}`} target="_blank" rel="noreferrer"
             className="inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-pine/40 hover:text-pine">
             <ExternalLink size={12} /> view Band room
           </a>

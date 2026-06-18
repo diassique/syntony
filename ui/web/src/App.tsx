@@ -1,20 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import Landing from './components/Landing'
 import Dashboard from './components/Dashboard'
 import Auth from './components/Auth'
 import Console from './components/Console'
 import { AuthProvider, useAuth } from './auth'
-
-/** Tiny dependency-free hash router. */
-function useHashRoute(): string {
-  const [hash, setHash] = useState(() => window.location.hash)
-  useEffect(() => {
-    const onChange = () => setHash(window.location.hash)
-    window.addEventListener('hashchange', onChange)
-    return () => window.removeEventListener('hashchange', onChange)
-  }, [])
-  return hash
-}
+import { usePathname, Redirect, interceptLinks } from './router'
 
 function Splash() {
   return (
@@ -25,21 +15,22 @@ function Splash() {
 }
 
 function Routes() {
-  const route = useHashRoute()
+  const path = usePathname()
   const { user, loading } = useAuth()
 
-  if (route.startsWith('#/live')) return <Dashboard />
-  if (route.startsWith('#/login')) return <Auth mode="login" />
-  if (route.startsWith('#/signup')) return <Auth mode="signup" />
-  if (route.startsWith('#/app')) {
+  if (path === '/live') return <Dashboard />
+  if (path === '/login') return <Auth mode="login" />
+  if (path === '/signup') return <Auth mode="signup" />
+  if (path === '/app' || path.startsWith('/app/')) {
     if (loading) return <Splash /> // wait for session restore before deciding
-    if (!user) { window.location.hash = '#/login'; return <Splash /> }
+    if (!user) return <Redirect to="/login" />
     return <Console />
   }
   return <Landing />
 }
 
 export default function App() {
+  useEffect(() => { interceptLinks() }, [])
   return (
     <AuthProvider>
       <Routes />

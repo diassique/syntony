@@ -887,9 +887,22 @@ async def ws(websocket: WebSocket) -> None:
 
 
 # Serve the built React SPA at "/" when it exists; otherwise a hint. Mount LAST so the
-# API/WS routes above take precedence.
+# API/WS routes above take precedence. Unknown non-API paths fall back to index.html so the
+# client-side path router (/app/agents, /pitch-deck, …) resolves on deep links + refresh.
 if _DIST.is_dir():
-    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="spa")
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    class SPAStaticFiles(StaticFiles):
+        """StaticFiles that returns the SPA shell for unknown client routes (not for API/assets)."""
+        async def get_response(self, path: str, scope):  # type: ignore[override]
+            try:
+                return await super().get_response(path, scope)
+            except StarletteHTTPException as exc:
+                if exc.status_code == 404 and not path.startswith("api") and path != "ws":
+                    return await super().get_response("index.html", scope)
+                raise
+
+    app.mount("/", SPAStaticFiles(directory=str(_DIST), html=True), name="spa")
 else:
     @app.get("/")
     def _no_build() -> PlainTextResponse:
